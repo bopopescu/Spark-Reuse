@@ -185,6 +185,7 @@ private[spark] class TaskSetManager(
     }
 
     for (loc <- tasks(index).preferredLocations) {
+      logDebug("task %d : preferredLocations %s".format(index, loc.host))
       loc match {
         case e: ExecutorCacheTaskLocation =>
           addTo(pendingTasksForExecutor.getOrElseUpdate(e.executorId, new ArrayBuffer))
@@ -204,6 +205,7 @@ private[spark] class TaskSetManager(
         }
         case _ => Unit
       }
+      logDebug("Add task %d to pendingTasksForHost %s".format(index, loc.host))
       addTo(pendingTasksForHost.getOrElseUpdate(loc.host, new ArrayBuffer))
       for (rack <- sched.getRackForHost(loc.host)) {
         addTo(pendingTasksForRack.getOrElseUpdate(rack, new ArrayBuffer))
@@ -232,7 +234,10 @@ private[spark] class TaskSetManager(
    * there is no map entry for that host
    */
   private def getPendingTasksForHost(host: String): ArrayBuffer[Int] = {
-    pendingTasksForHost.getOrElse(host, ArrayBuffer())
+    val buffer = pendingTasksForHost.getOrElse(host, ArrayBuffer())
+    logDebug("In getPendingTasksForHost")
+    buffer.foreach(x => logDebug("Task index:" + x))
+    buffer
   }
 
   /**
@@ -251,6 +256,7 @@ private[spark] class TaskSetManager(
    */
   private def findTaskFromList(execId: String, list: ArrayBuffer[Int]): Option[Int] = {
     var indexOffset = list.size
+    logDebug("In findTaskFromList: list size is " + list.size)
     while (indexOffset > 0) {
       indexOffset -= 1
       val index = list(indexOffset)

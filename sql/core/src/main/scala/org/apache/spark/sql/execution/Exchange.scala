@@ -51,8 +51,8 @@ case class Exchange(newPartitioning: Partitioning, child: SparkPlan) extends Una
   /** We must copy rows when sort based shuffle is on */
   protected def sortBasedShuffleOn = SparkEnv.get.shuffleManager.isInstanceOf[SortShuffleManager]
 
-  private val bypassMergeThreshold =
-    child.sqlContext.sparkContext.conf.getInt("spark.shuffle.sort.bypassMergeThreshold", 200)
+  private val bypassMergeThreshold = SparkEnv.get.conf.getInt("spark.shuffle.sort.bypassMergeThreshold", 200)
+    //child.sqlContext.sparkContext.conf.getInt("spark.shuffle.sort.bypassMergeThreshold", 200)
 
   override def execute():RDD[Row] = attachTree(this , "execute") {
     newPartitioning match {

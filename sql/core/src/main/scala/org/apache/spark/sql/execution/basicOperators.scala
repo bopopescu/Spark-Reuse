@@ -17,7 +17,8 @@
 
 package org.apache.spark.sql.execution
 
-import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql._
+import org.apache.spark.sql.catalyst.expressions.Row
 import org.apache.spark.sql.catalyst.types.StructType
 
 import scala.collection.mutable.ArrayBuffer
@@ -43,8 +44,7 @@ import scala.collection.mutable.Map
  * :: DeveloperApi ::
  */
 @DeveloperApi
-case class Project(projectList: Seq[NamedExpression], child: SparkPlan, optionRef: Option[QNodeRef] = None) extends UnaryNode {
-  //val newProjectList = projectList.sortWith((x,y) => x.name.compareTo(y.name) < 0)
+case class Project(projectList: Seq[NamedExpression], child: SparkPlan) extends UnaryNode {
   override def output = projectList.map(_.toAttribute)
 
 

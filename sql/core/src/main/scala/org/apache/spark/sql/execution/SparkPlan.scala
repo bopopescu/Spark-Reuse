@@ -99,8 +99,9 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
    * access to the sqlContext for RDD operations or configuration this field is automatically
    * populated by the query planning infrastructure.
    */
+  //zengdan add lazy
   @transient
-  protected[spark] val sqlContext = SparkPlan.currentContext.get()
+  protected[spark] lazy val sqlContext = SparkPlan.currentContext.get()
 
   protected def sparkContext = sqlContext.sparkContext
 

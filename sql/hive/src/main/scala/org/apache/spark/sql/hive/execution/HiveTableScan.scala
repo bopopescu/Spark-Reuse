@@ -85,7 +85,7 @@ case class HiveTableScan(
   addColumnMetadataToConf(hiveExtraConf)
 
   @transient
-  private[this] val hadoopReader = 
+  private[this] val hadoopReader =
     new HadoopTableReader(attributes, relation, context, hiveExtraConf)
 
   private[this] def castFromString(value: String, dataType: DataType) = {

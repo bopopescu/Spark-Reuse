@@ -91,8 +91,8 @@ private[spark] class QGMaster(
       updateDependencies(planDesc.appId, planDesc.jars)
       val plan = serializer.newInstance().deserialize[SparkPlan](planDesc.serializedPlan.value,
         urlClassLoader)
-      val refs = QueryGraph.qg.planRewritten(plan)
-      sender ! refs
+      val updateInfo = QueryGraph.qg.planRewritten(plan)
+      sender ! updateInfo
     }
 
     case UpdateInfo(statistics) =>

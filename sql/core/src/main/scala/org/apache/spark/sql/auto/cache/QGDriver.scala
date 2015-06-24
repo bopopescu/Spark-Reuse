@@ -26,7 +26,7 @@ import org.apache.spark.util.{SerializableBuffer, Utils, SignalLogger, AkkaUtils
 import scala.collection.mutable.Map
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future}
-import org.apache.spark.sql.auto.cache.QGUtils.PlanDesc
+import org.apache.spark.sql.auto.cache.QGUtils.{PlanDesc, PlanUpdate}
 
 class QGDriver(sc: SparkContext) extends Actor with Logging{
 
@@ -72,9 +72,16 @@ class QGDriver(sc: SparkContext) extends Actor with Logging{
     logInfo("PostStop in QGDriver")
   }
 
+  /*
   def rewritePlan(planDesc: PlanDesc): HashMap[Int, QNodeRef] = {
     askMasterWithReply[HashMap[Int, QNodeRef]](MatchSerializedPlan(planDesc))
   }
+  */
+  ///*
+  def rewritePlan(planDesc: PlanDesc): PlanUpdate = {
+    askMasterWithReply[PlanUpdate](MatchSerializedPlan(planDesc))
+  }
+  //*/
 
   def cacheFailed(id: Int):Boolean = {
     askMasterWithReply[Boolean](CacheFailed(id))
@@ -102,7 +109,7 @@ object QGDriver{
     (actorSystem, actorSystem.actorOf(Props(new QGDriver(sc)), "QGDriver"))
   }
 
-  def rewrittenPlan(plan: SparkPlan, sqlContext: SQLContext, actor: ActorRef): HashMap[Int, QNodeRef] = {
+  def rewrittenPlan(plan: SparkPlan, sqlContext: SQLContext, actor: ActorRef): PlanUpdate = {
     //QueryGraph.qg.planRewritten(plan)
     ///*
     val conf = sqlContext.sparkContext.getConf
@@ -115,7 +122,9 @@ object QGDriver{
 
     val timeout = Duration.create(conf.get("spark.sql.auto.cache.ask.timeout", "60").toLong, "seconds")
     val message = MatchSerializedPlan(plandesc)
-    AkkaUtils.askWithReply[HashMap[Int, QNodeRef]](message, actor,
+    //AkkaUtils.askWithReply[HashMap[Int, QNodeRef]](message, actor,
+    //  AkkaUtils.numRetries(conf), AkkaUtils.retryWaitMs(conf), timeout)
+    AkkaUtils.askWithReply[PlanUpdate](message, actor,
       AkkaUtils.numRetries(conf), AkkaUtils.retryWaitMs(conf), timeout)
     //*/
   }

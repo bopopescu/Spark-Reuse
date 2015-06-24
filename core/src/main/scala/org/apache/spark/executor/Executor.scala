@@ -209,20 +209,6 @@ private[spark] class Executor(
           throw new TaskKilledException
         }
 
-        //zengdan
-        val start = System.nanoTime()
-        if(costestimate == "true") {
-          val iter = Stats.statistics.get().entrySet().iterator()
-          while (iter.hasNext) {
-            val v = iter.next()
-            val ss = v.getValue
-            logDebug(s"key is ${v.getKey}.")
-            logDebug(s"time is ${ss(0)}. rowcount is ${ss(1)}. size is ${ss(2)}")
-          }
-        }
-        logDebug(s"Time to iterate over statistics is ${System.nanoTime() - start} ns")
-        //zengdan
-
         val resultSer = SparkEnv.get.serializer.newInstance()
         val beforeSerialization = System.currentTimeMillis()
         val valueBytes = resultSer.serialize(value)

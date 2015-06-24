@@ -17,7 +17,8 @@ class HiveTableCacheSuite extends FunSuite with Logging{
   System.setProperty("spark.tachyonStore.global.baseDir","/global_spark_tachyon")
   val conf = new SparkConf()
   conf.setAppName("TPCH").setMaster("local")
-  val sc = new SparkContext(conf)
+  conf.set("spark.sql.shuffle.partitions","1")
+  var sc = new SparkContext(conf)
   sc.hadoopConfiguration.set("fs.tachyon.impl","tachyon.hadoop.TFS")
 
   val sqlContext = new org.apache.spark.sql.hive.HiveContext(sc)
@@ -28,12 +29,12 @@ class HiveTableCacheSuite extends FunSuite with Logging{
   }.start()
 
   //Thread.sleep(5000)
-  val iter = 3
-  val collect = false
+  val iter = 1
+  val collect = true
 
   test("TPCH Q1"){
 
-    for(query <- 1 to 1) {
+    for(query <- 77 to 77) {
       logInfo(s"=======query $query=======")
       val q = query
       this.getClass.getMethod("executeQ" + q, Array.empty[Class[_]]: _*).invoke(this, Array.empty[Object]: _*)
@@ -41,6 +42,67 @@ class HiveTableCacheSuite extends FunSuite with Logging{
     }
   }
 
+  def executeQ77() = {
+    val res = sqlContext.sql(
+      """select s_nationkey, o_custkey, l_shipdate, l_extendedprice * (1 - l_discount) as volume
+          from supplier,lineitem,orders
+          where s_suppkey = l_suppkey and o_orderkey = l_orderkey and l_shipdate between '1995-01-01' and '1996-12-31'
+      """)
+    res.collect()
+  }
+
+  //test exchange unmatch
+  def executeQ24()={
+    val res0 = sqlContext.sql("""select l_returnflag, l_linestatus, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
+                                from lineitem
+                                where l_shipdate <= '1998-09-16'
+                                group by l_returnflag, l_linestatus""")
+    res0.collect().foreach(println)
+    sc.stop()
+
+    val conf1 = new SparkConf()
+    conf1.setAppName("TPCH2").setMaster("local")
+    conf1.set("spark.sql.shuffle.partitions","2")
+    sc = new SparkContext(conf1)
+    sc.hadoopConfiguration.set("fs.tachyon.impl","tachyon.hadoop.TFS")
+
+    val sqlContext1 = new org.apache.spark.sql.hive.HiveContext(sc)
+
+    val res1 = sqlContext1.sql("""select l_returnflag, l_linestatus, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
+                                from lineitem
+                                where l_shipdate <= '1998-09-16'
+                                group by l_returnflag, l_linestatus""")
+    res1.collect().foreach(println)
+    sc.stop()
+
+  }
+
+  //test project subsumption
+  def executeQ25()={
+    val res0 = sqlContext.sql("""select l_returnflag, l_linestatus, l_shipmode, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
+                                from lineitem
+                                where l_shipdate <= '1998-09-16' and l_shipmode = 'mode'
+                                group by l_returnflag, l_linestatus, l_shipmode""")
+    res0.collect().foreach(println)
+    sc.stop()
+
+    val conf1 = new SparkConf()
+    conf1.setAppName("TPCH2").setMaster("local")
+    sc = new SparkContext(conf1)
+    sc.hadoopConfiguration.set("fs.tachyon.impl","tachyon.hadoop.TFS")
+
+    val sqlContext1 = new org.apache.spark.sql.hive.HiveContext(sc)
+
+    val res1 = sqlContext1.sql("""select l_returnflag, l_linestatus, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
+                                from lineitem
+                                where l_shipdate <= '1998-09-16' and l_shipmode = 'mode'
+                                group by l_returnflag, l_linestatus""")
+    res1.collect()
+    sc.stop()
+
+  }
+
+  //test different order expression match
   def executeQ23()={
     val res0 = sqlContext.sql("""select l_returnflag, l_linestatus, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
                                 from lineitem
@@ -175,7 +237,8 @@ class HiveTableCacheSuite extends FunSuite with Logging{
                                 from supplier,lineitem,orders,customer,nation n1,nation n2
                                 where s_suppkey = l_suppkey and o_orderkey = l_orderkey and c_custkey = o_custkey and s_nationkey = n1.n_nationkey and c_nationkey = n2.n_nationkey and ((n1.n_name = 'KENYA' and n2.n_name = 'PERU')or (n1.n_name = 'PERU' and n2.n_name = 'KENYA')) and l_shipdate between '1995-01-01' and '1996-12-31') as shipping
                                 group by supp_nation,cust_nation,l_year""")
-      //order by supp_nation,cust_nation,l_year""")
+      //order by supp_nation,cust_nation,l_year"""
+
       if(collect) {
 
         val ret = res0.collect()
@@ -495,14 +558,14 @@ class HiveTableCacheSuite extends FunSuite with Logging{
 
 
   test("Create Hive Table"){
-    System.setProperty("spark.sql.shuffle.partitions","2")
-    System.setProperty("hive.metastore.warehouse.dir", "/Users/zengdan/hive")
-    val conf = new SparkConf()
-    conf.setAppName("Create Table").setMaster("local")
-    val sc = new SparkContext(conf)
-    sc.hadoopConfiguration.set("fs.tachyon.impl","tachyon.hadoop.TFS")
+    //System.setProperty("spark.sql.shuffle.partitions","2")
+    //System.setProperty("hive.metastore.warehouse.dir", "/Users/zengdan/hive")
+    //val conf = new SparkConf()
+    //conf.setAppName("Create Table").setMaster("local")
+    //val sc = new SparkContext(conf)
+    //sc.hadoopConfiguration.set("fs.tachyon.impl","tachyon.hadoop.TFS")
 
-    val sqlContext = new org.apache.spark.sql.hive.HiveContext(sc)
+    //val sqlContext = new org.apache.spark.sql.hive.HiveContext(sc)
     val path = "hdfs://localhost:9000/user/zengdan/tpch"
 
     val lineitem = sqlContext.sql("create external table if not exists  lineitem (l_orderkey int, l_partkey int, l_suppkey int, " +

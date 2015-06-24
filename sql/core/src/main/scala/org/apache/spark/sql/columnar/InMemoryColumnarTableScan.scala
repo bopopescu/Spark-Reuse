@@ -184,7 +184,7 @@ private[sql] case class InMemoryColumnarTableScan(
     relation: InMemoryRelation)
   extends LeafNode {
 
-  @transient override val sqlContext = relation.child.sqlContext
+  @transient override lazy val sqlContext = relation.child.sqlContext
 
   override def output: Seq[Attribute] = attributes
 

@@ -314,6 +314,7 @@ class HadoopRDD[K, V](
         }
       case None => None
     }
+    logDebug("HadoopRDD getPreferredLocations for split %d is %s".format(split.index, hsplit.getLocations()(0)))
     locs.getOrElse(hsplit.getLocations.filter(_ != "localhost"))
   }
 

@@ -20,11 +20,11 @@ package org.apache.spark.sql
 
 import java.lang.String
 import java.nio.ByteBuffer
-import java.util.HashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 import org.apache.hadoop.mapred.FileAlreadyExistsException
 import org.apache.spark.serializer.Serializer
+import org.apache.spark.sql.auto.cache.QGUtils.NodeDesc
 import org.apache.spark.util.collection.OpenHashSet
 import org.apache.spark.util.{AkkaUtils, Utils, SerializableBuffer}
 
@@ -51,7 +51,7 @@ import org.apache.spark.sql.sources.{DataSourceStrategy, BaseRelation, DDLParser
 
 import org.apache.spark.sql.auto.cache.QGDriver
 
-import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.{ArrayBuffer, HashMap}
 
 /**
  * :: AlphaComponent ::
@@ -411,7 +411,7 @@ class SQLContext(@transient val sparkContext: SparkContext)
         //filterCondition.map(Filter(_, scan, optionRef)).getOrElse(scan)
       } else {
         val scan = scanBuilder((projectSet ++ filterSet).toSeq)
-        val project = Project(projectList, filterCondition.map(Filter(_, scan)).getOrElse(scan), optionRef)
+        val project = Project(projectList, filterCondition.map(Filter(_, scan)).getOrElse(scan))
         project.totalCollect = true
         project
       }
@@ -450,13 +450,16 @@ class SQLContext(@transient val sparkContext: SparkContext)
 
   var planId = 0
 
-  def getOptimizedPlan(plan: SparkPlan): SparkPlan = {
+  def getOptimizedPlan(plan: SparkPlan) = {
     if(this.sparkContext.getConf.get("spark.sql.auto.cache", "false").toBoolean){
       planId = makeIdForPlan(plan, planId)
       //recoveryContext(plan, QGDriver.rewrittenPlan(plan, this, qgDriver))
-      setNodeRef(plan, QGDriver.rewrittenPlan(plan, this, qgDriver))
-    }
-    plan
+      val planUpdate = QGDriver.rewrittenPlan(plan, this, qgDriver)
+      val x = updatePlan(plan, planUpdate.refs, planUpdate.varNodes)
+      x
+      //setNodeRef(plan, QGDriver.rewrittenPlan(plan, this, qgDriver))
+    }else
+      plan
   }
 
 
@@ -473,12 +476,51 @@ class SQLContext(@transient val sparkContext: SparkContext)
     }
   }
 
-  def setNodeRef(plan: SparkPlan, refs: HashMap[Int, QNodeRef]){
-    if(plan != null){
-      if(refs.get(plan.id) != null){
-        plan.nodeRef = Some(refs.get(plan.id))
+  def updatePlan(plan: SparkPlan, refs: HashMap[Int, QNodeRef],
+                 added: HashMap[Int, ArrayBuffer[NodeDesc]]): SparkPlan = {
+    if(plan == null) return null
+
+    val oldChildren = plan.children
+    val childrenBuffer = new ArrayBuffer[SparkPlan]()
+    for (child <- oldChildren) {
+      childrenBuffer.append(updatePlan(child, refs, added))
+    }
+
+
+
+    if(refs.get(plan.id).isDefined){
+      val nr = refs.get(plan.id).get
+      plan.nodeRef = Some(QNodeRef(nr.id, nr.cache, nr.collect, nr.reuse))
+    }
+
+    //children need to add
+    val children = added.get(plan.id).getOrElse(Nil)
+    if(!children.isEmpty){
+      var i = 0
+      if(children.length == 1){
+        //val child = plan.getClass.getConstructor(plan.args: _*)
+        val child = plan.getClass.getConstructors.find(_.getParameterTypes.size != 0).head
+                  .newInstance((children(0).args ++ childrenBuffer).toArray:_*).asInstanceOf[plan.type]
+        child.nodeRef = Some(children(0).nodeRef)
+        return plan.withNewChildren(Seq(child))
+      }else{
+        //combine child operator
       }
-      for(child <- plan.children){
+    }
+
+    return plan.withNewChildren(childrenBuffer)
+  }
+
+  def test(x: Any*): Unit ={
+    println("test")
+  }
+
+  def setNodeRef(plan: SparkPlan, refs: HashMap[Int, QNodeRef]) {
+    if (plan != null) {
+      if (refs.get(plan.id).isDefined) {
+        plan.nodeRef = Some(refs.get(plan.id).get)
+      }
+      for (child <- plan.children) {
         setNodeRef(child, refs)
       }
     }
@@ -634,12 +676,13 @@ class SQLContext(@transient val sparkContext: SparkContext)
       val (data: Option[(RDD[Row], RDD[Row])], exist: Boolean) =
         this.sparkContext.loadOperatorFile[Row](nodeRef.get.id)
       if (exist) {
-        loaded = Some(projectLoadedData(data.get._1, data.get._2, output))
+        loaded = Some(SQLContext.projectLoadedData(data.get._1, data.get._2, output))
       }
     }
     loaded
   }
 
+  /*
   def projectLoadedData(rdd: RDD[Row], schema: RDD[Row], output: Seq[Attribute]):RDD[Row] = {
     val loadSchemaRdd = schema.collect()
     require(loadSchemaRdd.size == 1, "Length of schema is not 1!")
@@ -692,6 +735,7 @@ class SQLContext(@transient val sparkContext: SparkContext)
       }
     }
   }
+  */
 
   def cacheData(rdd: RDD[Row], output: Seq[Attribute],
                       id: Int):RDD[Row] = {
@@ -715,9 +759,65 @@ class SQLContext(@transient val sparkContext: SparkContext)
 
     //read schema
     if (reread) {
-      projectLoadedData(data, schema, output)
+      SQLContext.projectLoadedData(data, schema, output)
     }else{
       data
+    }
+  }
+}
+
+object SQLContext{
+
+  def projectLoadedData(rdd: RDD[Row], schema: RDD[Row], output: Seq[Attribute]):RDD[Row] = {
+    val loadSchemaRdd = schema.collect()
+    require(loadSchemaRdd.size == 1, "Length of schema is not 1!")
+    require(loadSchemaRdd(0).size == output.size, "Length of schema doesn't match!")
+
+    val schemaWithIndex = scala.collection.mutable.Map[String, Int]()
+    //schemaWithIndex ++= output.map(_.treeStringByName).zipWithIndex
+
+    var i = 0
+    while (i < loadSchemaRdd(0).size) {
+      schemaWithIndex += (loadSchemaRdd(0).getString(i) -> i)
+      //schemaIndexMap += (i -> schemaWithIndex(loadSchemaRdd(0).getString(i)))
+      i += 1
+    }
+
+    //val attributeName = output.map(_.name)
+
+    rdd.mapPartitions { loadIter =>
+      new Iterator[Row] {
+        private val mutableRow = new GenericMutableRow(output.size)
+
+        override def hasNext = loadIter.hasNext
+
+        override def next: Row = {
+          val input = loadIter.next()
+          var i = 0
+          while (i < output.size) {
+            val inputIndex = try {
+              schemaWithIndex.get(output(i).name).get
+            } catch {
+              case e: Exception =>
+                throw new RuntimeException(e)
+            }
+            //val inputIndex = schemaIndexMap(i)
+            mutableRow(i) = output(i).dataType match {
+              case IntegerType => input.getInt(inputIndex)
+              case BooleanType => input.getBoolean(inputIndex)
+              case LongType => input.getLong(inputIndex)
+              case DoubleType => input.getDouble(inputIndex)
+              case FloatType => input.getFloat(inputIndex)
+              case ShortType => input.getShort(inputIndex)
+              case ByteType => input.getByte(inputIndex)
+              case StringType => input.getString(inputIndex)
+              case ArrayType(_, _) => input.getAs[Array[_]](inputIndex)
+            }
+            i += 1
+          }
+          mutableRow
+        }
+      }
     }
   }
 }
