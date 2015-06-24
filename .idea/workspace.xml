@@ -87,7 +87,7 @@
         <entry file="file://$PROJECT_DIR$/sql/hive/src/test/scala/org/apache/spark/sql/hive/auto/cache/HiveTableCacheSuite.scala">
           <provider selected="true" editor-type-id="text-editor">
             <state vertical-scroll-proportion="0.0">
-              <caret line="50" column="17" selection-start-line="50" selection-start-column="17" selection-end-line="50" selection-end-column="17" />
+              <caret line="50" column="0" selection-start-line="50" selection-start-column="0" selection-end-line="50" selection-end-column="0" />
               <folding />
             </state>
           </provider>
@@ -107,7 +107,7 @@
         <entry file="file://$PROJECT_DIR$/sql/core/src/main/scala/org/apache/spark/sql/auto/cache/QueryGraph.scala">
           <provider selected="true" editor-type-id="text-editor">
             <state vertical-scroll-proportion="0.0">
-              <caret line="296" column="32" selection-start-line="296" selection-start-column="32" selection-end-line="296" selection-end-column="32" />
+              <caret line="296" column="13" selection-start-line="296" selection-start-column="13" selection-end-line="296" selection-end-column="13" />
               <folding />
             </state>
           </provider>
@@ -116,8 +116,18 @@
       <file leaf-file-name="SQLContext.scala" pinned="false" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/sql/core/src/main/scala/org/apache/spark/sql/SQLContext.scala">
           <provider selected="true" editor-type-id="text-editor">
-            <state vertical-scroll-proportion="0.48353294">
-              <caret line="460" column="5" selection-start-line="460" selection-start-column="5" selection-end-line="460" selection-end-column="5" />
+            <state vertical-scroll-proportion="-0.17964073">
+              <caret line="477" column="0" selection-start-line="477" selection-start-column="0" selection-end-line="477" selection-end-column="0" />
+              <folding />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file leaf-file-name="QGDriver.scala" pinned="false" current-in-tab="false">
+        <entry file="file://$PROJECT_DIR$/sql/core/src/main/scala/org/apache/spark/sql/auto/cache/QGDriver.scala">
+          <provider selected="true" editor-type-id="text-editor">
+            <state vertical-scroll-proportion="0.0">
+              <caret line="104" column="6" selection-start-line="104" selection-start-column="6" selection-end-line="104" selection-end-column="6" />
               <folding />
             </state>
           </provider>
@@ -212,8 +222,6 @@
     </navigator>
     <panes>
       <pane id="PackagesPane" />
-      <pane id="Scratches" />
-      <pane id="Scope" />
       <pane id="ProjectPane">
         <subPane>
           <PATH>
@@ -1004,6 +1012,8 @@
           </PATH>
         </subPane>
       </pane>
+      <pane id="Scope" />
+      <pane id="Scratches" />
     </panes>
   </component>
   <component name="PropertiesComponent">
@@ -1420,11 +1430,12 @@
       <workItem from="1435110707434" duration="277000" />
       <workItem from="1435111855529" duration="53000" />
       <workItem from="1435114159406" duration="718000" />
+      <workItem from="1435115178699" duration="135000" />
     </task>
     <servers />
   </component>
   <component name="TimeTrackingManager">
-    <option name="totallyTimeSpent" value="64708000" />
+    <option name="totallyTimeSpent" value="64843000" />
   </component>
   <component name="ToolWindowManager">
     <frame x="0" y="22" width="1440" height="788" extended-state="6" />
@@ -1561,13 +1572,6 @@
       <provider selected="true" editor-type-id="text-editor">
         <state vertical-scroll-proportion="0.0">
           <caret line="53" column="44" selection-start-line="53" selection-start-column="44" selection-end-line="53" selection-end-column="44" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/sql/core/src/main/scala/org/apache/spark/sql/auto/cache/QGDriver.scala">
-      <provider selected="true" editor-type-id="text-editor">
-        <state vertical-scroll-proportion="0.0">
-          <caret line="111" column="11" selection-start-line="111" selection-start-column="6" selection-end-line="111" selection-end-column="19" />
         </state>
       </provider>
     </entry>
@@ -1844,7 +1848,7 @@
     <entry file="file://$PROJECT_DIR$/sql/hive/src/test/scala/org/apache/spark/sql/hive/auto/cache/HiveTableCacheSuite.scala">
       <provider selected="true" editor-type-id="text-editor">
         <state vertical-scroll-proportion="0.0">
-          <caret line="50" column="17" selection-start-line="50" selection-start-column="17" selection-end-line="50" selection-end-column="17" />
+          <caret line="50" column="0" selection-start-line="50" selection-start-column="0" selection-end-line="50" selection-end-column="0" />
           <folding />
         </state>
       </provider>
@@ -1860,7 +1864,7 @@
     <entry file="file://$PROJECT_DIR$/sql/core/src/main/scala/org/apache/spark/sql/auto/cache/QueryGraph.scala">
       <provider selected="true" editor-type-id="text-editor">
         <state vertical-scroll-proportion="0.0">
-          <caret line="296" column="32" selection-start-line="296" selection-start-column="32" selection-end-line="296" selection-end-column="32" />
+          <caret line="296" column="13" selection-start-line="296" selection-start-column="13" selection-end-line="296" selection-end-column="13" />
           <folding />
         </state>
       </provider>
@@ -1881,10 +1885,18 @@
         </state>
       </provider>
     </entry>
+    <entry file="file://$PROJECT_DIR$/sql/core/src/main/scala/org/apache/spark/sql/auto/cache/QGDriver.scala">
+      <provider selected="true" editor-type-id="text-editor">
+        <state vertical-scroll-proportion="0.0">
+          <caret line="104" column="6" selection-start-line="104" selection-start-column="6" selection-end-line="104" selection-end-column="6" />
+          <folding />
+        </state>
+      </provider>
+    </entry>
     <entry file="file://$PROJECT_DIR$/sql/core/src/main/scala/org/apache/spark/sql/SQLContext.scala">
       <provider selected="true" editor-type-id="text-editor">
-        <state vertical-scroll-proportion="0.48353294">
-          <caret line="460" column="5" selection-start-line="460" selection-start-column="5" selection-end-line="460" selection-end-column="5" />
+        <state vertical-scroll-proportion="-0.17964073">
+          <caret line="477" column="0" selection-start-line="477" selection-start-column="0" selection-end-line="477" selection-end-column="0" />
           <folding />
         </state>
       </provider>
