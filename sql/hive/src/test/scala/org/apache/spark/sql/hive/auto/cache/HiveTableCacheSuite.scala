@@ -28,13 +28,13 @@ class HiveTableCacheSuite extends FunSuite with Logging{
     }
   }.start()
 
-  //Thread.sleep(5000)
+  Thread.sleep(5000)
   val iter = 1
   val collect = true
 
   test("TPCH Q1"){
 
-    for(query <- 77 to 77) {
+    for(query <- 24 to 24) {
       logInfo(s"=======query $query=======")
       val q = query
       this.getClass.getMethod("executeQ" + q, Array.empty[Class[_]]: _*).invoke(this, Array.empty[Object]: _*)
@@ -42,14 +42,7 @@ class HiveTableCacheSuite extends FunSuite with Logging{
     }
   }
 
-  def executeQ77() = {
-    val res = sqlContext.sql(
-      """select s_nationkey, o_custkey, l_shipdate, l_extendedprice * (1 - l_discount) as volume
-          from supplier,lineitem,orders
-          where s_suppkey = l_suppkey and o_orderkey = l_orderkey and l_shipdate between '1995-01-01' and '1996-12-31'
-      """)
-    res.collect()
-  }
+
 
   //test exchange unmatch
   def executeQ24()={
@@ -81,59 +74,54 @@ class HiveTableCacheSuite extends FunSuite with Logging{
   def executeQ25()={
     val res0 = sqlContext.sql("""select l_returnflag, l_linestatus, l_shipmode, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
                                 from lineitem
-                                where l_shipdate <= '1998-09-16' and l_shipmode = 'mode'
+                                where l_shipdate <= '1998-09-16' and l_shipmode != 'mode'
                                 group by l_returnflag, l_linestatus, l_shipmode""")
-    res0.collect().foreach(println)
-    sc.stop()
 
-    val conf1 = new SparkConf()
-    conf1.setAppName("TPCH2").setMaster("local")
-    sc = new SparkContext(conf1)
-    sc.hadoopConfiguration.set("fs.tachyon.impl","tachyon.hadoop.TFS")
+    res0.collect()
 
-    val sqlContext1 = new org.apache.spark.sql.hive.HiveContext(sc)
-
-    val res1 = sqlContext1.sql("""select l_returnflag, l_linestatus, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
+    val res1 = sqlContext.sql("""select l_returnflag, l_linestatus, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
                                 from lineitem
-                                where l_shipdate <= '1998-09-16' and l_shipmode = 'mode'
+                                where l_shipdate <= '1998-09-16' and l_shipmode != 'mode'
                                 group by l_returnflag, l_linestatus""")
     res1.collect()
-    sc.stop()
 
   }
 
-  //test different order expression match
+  //test different order filter expression match
   def executeQ23()={
     val res0 = sqlContext.sql("""select l_returnflag, l_linestatus, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
                                 from lineitem
                                 where l_shipdate <= '1998-09-16' or (l_quantity < 2 and l_extendedprice > 10 and l_extendedprice < 100)
-                                group by l_returnflag, l_linestatus""")
-    val x = res0.queryExecution.executedPlan
-    println(x(0))
+                                group by l_returnflag, l_linestatus""").collect()
+    //val x = res0.queryExecution.executedPlan
+    //println(x(0))
+    //res0.collect()
 
     val res1 = sqlContext.sql("""select l_returnflag, l_linestatus, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
                                 from lineitem
                                 where (l_extendedprice > 10 and l_quantity < 2 and 100 > l_extendedprice) or l_shipdate <= '1998-09-16'
-                                group by l_returnflag, l_linestatus""")
-    val y = res1.queryExecution.executedPlan
-
-    println(y(0))
+                                group by l_returnflag, l_linestatus""").collect()
+    //val y = res1.queryExecution.executedPlan
+    //println(y(0))
+    //res1.collect()
 
     val res2 = sqlContext.sql("""select l_returnflag, l_linestatus, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
                                 from lineitem
                                 where 2 > l_quantity  and l_shipdate <= '1998-09-16'
-                                group by l_returnflag, l_linestatus""")
-    val z = res1.queryExecution.executedPlan
+                                group by l_returnflag, l_linestatus""").collect()
+    //val z = res1.queryExecution.executedPlan
 
-    println(z(0))
+    //println(z(0))
+    //res2.collect()
 
     val res3 = sqlContext.sql("""select l_returnflag, l_linestatus, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
                                 from lineitem
                                 where '1998-09-16' >= l_shipdate and 2 > l_quantity
-                                group by l_returnflag, l_linestatus""")
-    val t = res1.queryExecution.executedPlan
+                                group by l_returnflag, l_linestatus""").collect()
+    //val t = res1.queryExecution.executedPlan
 
-    println(t(0))
+    //println(t(0))
+    //res3.collect()
 
   }
 

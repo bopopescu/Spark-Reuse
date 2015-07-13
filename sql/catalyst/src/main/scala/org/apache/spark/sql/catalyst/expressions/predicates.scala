@@ -252,10 +252,10 @@ case class GreaterThan(left: Expression, right: Expression) extends BinaryCompar
   override def transformExpression(): Expression = {
     val tLeft = left.transformExpression()
     val tRight = right.transformExpression()
-    if(tLeft.isInstanceOf[AttributeReference] && tRight.isInstanceOf[AttributeReference])
+    //if(tLeft.isInstanceOf[AttributeReference] && tRight.isInstanceOf[AttributeReference])
       new LessThan(tRight, tLeft)
-    else
-      new GreaterThan(tLeft, tRight)
+    //else
+    //  new GreaterThan(tLeft, tRight)
   }
 }
 
@@ -267,10 +267,10 @@ case class GreaterThanOrEqual(left: Expression, right: Expression) extends Binar
   override def transformExpression(): Expression = {
     val tLeft = left.transformExpression()
     val tRight = right.transformExpression()
-    if(tLeft.isInstanceOf[AttributeReference] && tRight.isInstanceOf[AttributeReference])
+    //if(tLeft.isInstanceOf[AttributeReference] && tRight.isInstanceOf[AttributeReference])
       new LessThanOrEqual(tRight, tLeft)
-    else
-      new GreaterThanOrEqual(tLeft, tRight)
+    //else
+    //  new GreaterThanOrEqual(tLeft, tRight)
   }
 }
 
