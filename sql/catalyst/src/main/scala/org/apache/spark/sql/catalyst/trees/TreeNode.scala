@@ -322,6 +322,8 @@ abstract class TreeNode[BaseType <: TreeNode[BaseType]] {
   //zengdan
   def treeStringByName = generateTreeStringByName(0, new StringBuilder).toString
 
+
+
   /**
    * Returns a string representation of the nodes in this tree, where each operator is numbered.
    * The numbers can be used with [[trees.TreeNode.apply apply]] to easily access specific subtrees.

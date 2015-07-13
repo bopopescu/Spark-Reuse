@@ -3,21 +3,22 @@ package org.apache.spark.sql.hive.auto.cache
 import org.apache.spark.sql.auto.cache.QGMaster
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.storage.StorageLevel
-import org.apache.spark.{SparkContext, SparkConf}
+import org.apache.spark.{Logging, SparkContext, SparkConf}
 import org.scalatest.FunSuite
 
 /**
  * Created by zengdan on 15-4-27.
  */
-class HiveTableCacheSuite extends FunSuite{
+class HiveTableCacheSuite extends FunSuite with Logging{
 
-  System.setProperty("spark.sql.auto.cache", "false")
+  System.setProperty("spark.sql.auto.cache", "true")
   //System.setProperty("spark.sql.shuffle.partitions","1")
   System.setProperty("hive.metastore.warehouse.dir", "/Users/zengdan/hive")
   System.setProperty("spark.tachyonStore.global.baseDir","/global_spark_tachyon")
   val conf = new SparkConf()
   conf.setAppName("TPCH").setMaster("local")
-  val sc = new SparkContext(conf)
+  conf.set("spark.sql.shuffle.partitions","1")
+  var sc = new SparkContext(conf)
   sc.hadoopConfiguration.set("fs.tachyon.impl","tachyon.hadoop.TFS")
 
   val sqlContext = new org.apache.spark.sql.hive.HiveContext(sc)
@@ -25,33 +26,130 @@ class HiveTableCacheSuite extends FunSuite{
     override def run(){
       QGMaster.main("--host localhost --port 7070".split(" "))
     }
-  }
-  //.start()
+  }.start()
 
-  Thread.sleep(5000)
-  val iter = 4
+  //Thread.sleep(5000)
+  val iter = 1
   val collect = true
 
   test("TPCH Q1"){
 
-    for(query <- 1 to 1) {
+    for(query <- 77 to 77) {
+      logInfo(s"=======query $query=======")
       val q = query
       this.getClass.getMethod("executeQ" + q, Array.empty[Class[_]]: _*).invoke(this, Array.empty[Object]: _*)
+      println(s"=======query $query=======")
     }
+  }
+
+  def executeQ77() = {
+    val res = sqlContext.sql(
+      """select s_nationkey, o_custkey, l_shipdate, l_extendedprice * (1 - l_discount) as volume
+          from supplier,lineitem,orders
+          where s_suppkey = l_suppkey and o_orderkey = l_orderkey and l_shipdate between '1995-01-01' and '1996-12-31'
+      """)
+    res.collect()
+  }
+
+  //test exchange unmatch
+  def executeQ24()={
+    val res0 = sqlContext.sql("""select l_returnflag, l_linestatus, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
+                                from lineitem
+                                where l_shipdate <= '1998-09-16'
+                                group by l_returnflag, l_linestatus""")
+    res0.collect().foreach(println)
+    sc.stop()
+
+    val conf1 = new SparkConf()
+    conf1.setAppName("TPCH2").setMaster("local")
+    conf1.set("spark.sql.shuffle.partitions","2")
+    sc = new SparkContext(conf1)
+    sc.hadoopConfiguration.set("fs.tachyon.impl","tachyon.hadoop.TFS")
+
+    val sqlContext1 = new org.apache.spark.sql.hive.HiveContext(sc)
+
+    val res1 = sqlContext1.sql("""select l_returnflag, l_linestatus, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
+                                from lineitem
+                                where l_shipdate <= '1998-09-16'
+                                group by l_returnflag, l_linestatus""")
+    res1.collect().foreach(println)
+    sc.stop()
+
+  }
+
+  //test project subsumption
+  def executeQ25()={
+    val res0 = sqlContext.sql("""select l_returnflag, l_linestatus, l_shipmode, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
+                                from lineitem
+                                where l_shipdate <= '1998-09-16' and l_shipmode = 'mode'
+                                group by l_returnflag, l_linestatus, l_shipmode""")
+    res0.collect().foreach(println)
+    sc.stop()
+
+    val conf1 = new SparkConf()
+    conf1.setAppName("TPCH2").setMaster("local")
+    sc = new SparkContext(conf1)
+    sc.hadoopConfiguration.set("fs.tachyon.impl","tachyon.hadoop.TFS")
+
+    val sqlContext1 = new org.apache.spark.sql.hive.HiveContext(sc)
+
+    val res1 = sqlContext1.sql("""select l_returnflag, l_linestatus, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
+                                from lineitem
+                                where l_shipdate <= '1998-09-16' and l_shipmode = 'mode'
+                                group by l_returnflag, l_linestatus""")
+    res1.collect()
+    sc.stop()
+
+  }
+
+  //test different order expression match
+  def executeQ23()={
+    val res0 = sqlContext.sql("""select l_returnflag, l_linestatus, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
+                                from lineitem
+                                where l_shipdate <= '1998-09-16' or (l_quantity < 2 and l_extendedprice > 10 and l_extendedprice < 100)
+                                group by l_returnflag, l_linestatus""")
+    val x = res0.queryExecution.executedPlan
+    println(x(0))
+
+    val res1 = sqlContext.sql("""select l_returnflag, l_linestatus, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
+                                from lineitem
+                                where (l_extendedprice > 10 and l_quantity < 2 and 100 > l_extendedprice) or l_shipdate <= '1998-09-16'
+                                group by l_returnflag, l_linestatus""")
+    val y = res1.queryExecution.executedPlan
+
+    println(y(0))
+
+    val res2 = sqlContext.sql("""select l_returnflag, l_linestatus, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
+                                from lineitem
+                                where 2 > l_quantity  and l_shipdate <= '1998-09-16'
+                                group by l_returnflag, l_linestatus""")
+    val z = res1.queryExecution.executedPlan
+
+    println(z(0))
+
+    val res3 = sqlContext.sql("""select l_returnflag, l_linestatus, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
+                                from lineitem
+                                where '1998-09-16' >= l_shipdate and 2 > l_quantity
+                                group by l_returnflag, l_linestatus""")
+    val t = res1.queryExecution.executedPlan
+
+    println(t(0))
+
   }
 
   def executeQ1()={
     for(i <- 1 to iter) {
 
-      val res0 = sqlContext.sql("""select l_returnflag, l_linestatus, sum(l_quantity) as sum_qty, sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
+      val res0 = sqlContext.sql("""select l_returnflag, l_linestatus, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
                                 from lineitem
                                 where l_shipdate <= '1998-09-16'
                                 group by l_returnflag, l_linestatus""")
 
       //res0.queryExecution.optimizedPlan(0).expressions.foreach(x => println(x.treeString))
       //order by l_returnflag, l_linestatus""")
+
       if(collect) res0.collect().foreach(println)
-      else res0.count()
+      else println("Result count is " + res0.count())
     }
   }
 
@@ -59,6 +157,7 @@ class HiveTableCacheSuite extends FunSuite{
     for(i <- 1 to iter) {
 
       val res0 = sqlContext.sql("""select s.s_acctbal as s_acctbal, s.s_name as s_name, n.n_name as n_name, p.p_partkey as p_partkey, ps.ps_supplycost as ps_supplycost, p.p_mfgr as p_mfgr, s.s_address as s_address, s.s_phone as s_phone, s.s_comment as s_comment from nation n join region r on n.n_regionkey = r.r_regionkey and r.r_name = 'EUROPE' join supplier s on s.s_nationkey = n.n_nationkey join partsupp ps on s.s_suppkey = ps.ps_suppkey join part p on p.p_partkey = ps.ps_partkey and p.p_size = 15 and p.p_type like '%BRASS' """)
+      ///*
       res0.persist(StorageLevel.MEMORY_AND_DISK)
       res0.registerTempTable("q2_minimum_cost_supplier_tmp1")
 
@@ -69,7 +168,7 @@ class HiveTableCacheSuite extends FunSuite{
       val res2 = sqlContext.sql("""select t1.s_acctbal, t1.s_name, t1.n_name, t1.p_partkey, t1.p_mfgr, t1.s_address, t1.s_phone, t1.s_comment from q2_minimum_cost_supplier_tmp1 t1 join q2_minimum_cost_supplier_tmp2 t2 on t1.p_partkey = t2.p_partkey and t1.ps_supplycost=t2.ps_min_supplycost""") //order by s_acctbal desc, n_name, s_name, p_partkey limit 100
 
       if(collect) res2.collect()
-      else res2.count()
+      else println("Result count is " + res2.count())
     }
   }
 
@@ -82,7 +181,7 @@ class HiveTableCacheSuite extends FunSuite{
       //order by revenue desc,o_orderdate
       //limit 10""")
       if(collect) res0.collect()
-      else res0.count()
+      else println("Result count is " + res0.count())
     }
   }
 
@@ -105,7 +204,7 @@ class HiveTableCacheSuite extends FunSuite{
       //order by o_orderpriority""")
 
       if(collect) res1.collect()
-      else res1.count()
+      else println("Result count is " + res1.count())
     }
   }
 
@@ -117,7 +216,7 @@ class HiveTableCacheSuite extends FunSuite{
                                 group by n_name""")
       //order by revenue desc""")
       if(collect) res0.collect()
-      else res0.count()
+      else println("Result count is " + res0.count())
     }
   }
 
@@ -127,7 +226,7 @@ class HiveTableCacheSuite extends FunSuite{
                                 from lineitem where l_shipdate >= '1993-01-01' and l_shipdate < '1994-01-01' and l_discount between 0.06 - 0.01 and 0.06 + 0.01 and l_quantity < 25""")
 
       if(collect) res0.collect()
-      else res0.count()
+      else println("Result count is " + res0.count())
     }
   }
 
@@ -138,17 +237,29 @@ class HiveTableCacheSuite extends FunSuite{
                                 from supplier,lineitem,orders,customer,nation n1,nation n2
                                 where s_suppkey = l_suppkey and o_orderkey = l_orderkey and c_custkey = o_custkey and s_nationkey = n1.n_nationkey and c_nationkey = n2.n_nationkey and ((n1.n_name = 'KENYA' and n2.n_name = 'PERU')or (n1.n_name = 'PERU' and n2.n_name = 'KENYA')) and l_shipdate between '1995-01-01' and '1996-12-31') as shipping
                                 group by supp_nation,cust_nation,l_year""")
-      //order by supp_nation,cust_nation,l_year""")
-      if(collect) res0.collect()
-      else res0.count()
+      //order by supp_nation,cust_nation,l_year"""
+
+      if(collect) {
+
+        val ret = res0.collect()
+        println("=======print results=======")
+        ret.foreach(println)
+        println("=======print results=======")
+      }
+      else println("Result count is " + res0.count())
     }
   }
 
   def executeQ8()= {
     for (i <- 1 to iter) {
       val res0 = sqlContext.sql("""select o_year, sum(case when nation = 'BRAZIL' then volume else 0.0 end) / sum(volume) as mkt_share from ( select year(o_orderdate) as o_year, l_extendedprice * (1-l_discount) as volume, n2.n_name as nation from nation n2 join (select o_orderdate, l_discount, l_extendedprice, s_nationkey from supplier s join (select o_orderdate, l_discount, l_extendedprice, l_suppkey from part p join (select o_orderdate, l_partkey, l_discount, l_extendedprice, l_suppkey from lineitem l join (select o_orderdate, o_orderkey from orders o join (select c.c_custkey from customer c join (select n1.n_nationkey from nation n1 join region r on n1.n_regionkey = r.r_regionkey and r.r_name = 'AMERICA' ) n11 on c.c_nationkey = n11.n_nationkey ) c1 on c1.c_custkey = o.o_custkey ) o1 on l.l_orderkey = o1.o_orderkey and o1.o_orderdate >= '1995-01-01' and o1.o_orderdate < '1996-12-31' ) l1 on p.p_partkey = l1.l_partkey and p.p_type = 'ECONOMY ANODIZED STEEL' ) p1 on s.s_suppkey = p1.l_suppkey ) s1 on s1.s_nationkey = n2.n_nationkey ) all_nation group by o_year""")// order by o_year""")
-      if(collect) res0.collect()
-      else res0.count()
+      if(collect) {
+        val ret = res0.collect()
+        println("=======print results=======")
+        ret.foreach(println)
+        println("=======print results=======")
+      }
+      else println("Result count is " + res0.count())
     }
   }
 
@@ -158,7 +269,7 @@ class HiveTableCacheSuite extends FunSuite{
         """select nation, o_year, sum(amount) as sum_profit from ( select n_name as nation, year(o_orderdate) as o_year, l_extendedprice * (1 - l_discount) -  ps_supplycost * l_quantity as amount from orders o join (select l_extendedprice, l_discount, l_quantity, l_orderkey, n_name, ps_supplycost from part p join (select l_extendedprice, l_discount, l_quantity, l_partkey, l_orderkey, n_name, ps_supplycost from partsupp ps join (select l_suppkey, l_extendedprice, l_discount, l_quantity, l_partkey, l_orderkey, n_name from (select s_suppkey, n_name from nation n join supplier s on n.n_nationkey = s.s_nationkey ) s1 join lineitem l on s1.s_suppkey = l.l_suppkey ) l1 on ps.ps_suppkey = l1.l_suppkey and ps.ps_partkey = l1.l_partkey ) l2 on p.p_name like '%green%' and p.p_partkey = l2.l_partkey ) l3 on o.o_orderkey = l3.l_orderkey )profit group by nation, o_year""")// order by nation, o_year desc""")
 
       if(collect) res0.collect()
-      else res0.count()
+      else println("Result count is " + res0.count())
     }
   }
 
@@ -171,7 +282,7 @@ class HiveTableCacheSuite extends FunSuite{
       //order by revenue desc
       //limit 20""")
       if(collect) res0.collect()
-      else res0.count()
+      else println("Result count is " + res0.count())
     }
   }
 
@@ -187,7 +298,7 @@ class HiveTableCacheSuite extends FunSuite{
       val res2 = sqlContext.sql("""select ps_partkey, part_value as value from ( select ps_partkey, part_value, total_value from q11_part_tmp join q11_sum_tmp ) a where part_value > total_value * 0.0001""") // order by value desc""")
 
       if(collect) res2.collect()
-      else res0.count()
+      else println("Result count is " + res2.count())
     }
   }
 
@@ -199,8 +310,12 @@ class HiveTableCacheSuite extends FunSuite{
                                 group by l_shipmode""")
       //order by l_shipmode""")
 
-      if(collect) res0.collect()
-      else res0.count()
+      if(collect) {
+        println("======print result=====")
+        res0.collect().foreach(println)
+        println("======print result=====")
+      }
+      else println("Result count is " + res0.count())
     }
   }
 
@@ -214,7 +329,7 @@ class HiveTableCacheSuite extends FunSuite{
       //order by custdist desc,c_count desc""")
 
       if(collect) res0.collect()
-      else res0.count()
+      else println("Result count is " + res0.count())
     }
   }
 
@@ -225,7 +340,7 @@ class HiveTableCacheSuite extends FunSuite{
                                 where l_partkey = p_partkey and l_shipdate >= '1995-08-01'and l_shipdate < '1995-09-01'""")
 
       if(collect) res0.collect()
-      else res0.count()
+      else println("Result count is " + res0.count())
     }
   }
 
@@ -249,7 +364,7 @@ class HiveTableCacheSuite extends FunSuite{
       //order by s_suppkey""")
 
       if(collect) res4.collect()
-      else res4.count()
+      else println("Result count is " + res4.count())
     }
   }
 
@@ -292,7 +407,7 @@ class HiveTableCacheSuite extends FunSuite{
       //order by supplier_cnt desc, p_brand, p_type, p_size""")
 
       if(collect) res4.collect()
-      else res4.count()
+      else println("Result count is " + res4.count())
     }
   }
 
@@ -309,7 +424,7 @@ class HiveTableCacheSuite extends FunSuite{
                                 where l_quantity < t_avg_quantity""")
 
       if(collect) res2.collect()
-      else res2.count()
+      else println("Result count is " + res2.count())
     }
   }
 
@@ -331,7 +446,7 @@ class HiveTableCacheSuite extends FunSuite{
       //order by o_totalprice desc, o_orderdate""")
 
       if(collect) res2.collect()
-      else println("Final result length is " + res2.count())
+      else println("Result count is " + res2.count())
     }
   }
 
@@ -343,7 +458,7 @@ class HiveTableCacheSuite extends FunSuite{
                                 where (p_brand = 'Brand#12' and p_container REGEXP 'SM CASE||SM BOX||SM PACK||SM PKG' and l_quantity >= 1 and l_quantity <= 11 and p_size >= 1 and p_size <= 5 and l_shipmode REGEXP 'AIR||AIR REG' and l_shipinstruct = 'DELIVER IN PERSON') or (p_brand = 'Brand#23' and p_container REGEXP 'MED BAG||MED BOX||MED PKG||MED PACK' and l_quantity >= 10 and l_quantity <= 20 and p_size >= 1 and p_size <= 10 and l_shipmode REGEXP 'AIR||AIR REG' and l_shipinstruct = 'DELIVER IN PERSON') or (p_brand = 'Brand#34' and p_container REGEXP 'LG CASE||LG BOX||LG PACK||LG PKG' and l_quantity >= 20 and l_quantity <= 30 and p_size >= 1 and p_size <= 15 and l_shipmode REGEXP 'AIR||AIR REG' and l_shipinstruct = 'DELIVER IN PERSON')""")
 
       if(collect) res0.collect()
-      else res0.count()
+      else println("Result count is " + res0.count())
     }
   }
 
@@ -381,7 +496,7 @@ class HiveTableCacheSuite extends FunSuite{
       //order by s_name""")
 
       if(collect) res8.collect()
-      else res8.count()
+      else println("Result count is " + res8.count())
     }
   }
 
@@ -407,7 +522,7 @@ class HiveTableCacheSuite extends FunSuite{
       //limit 100""")
 
       if(collect) res4.collect()
-      else res4.count()
+      else println("Result count is " + res4.count())
     }
   }
 
@@ -437,20 +552,20 @@ class HiveTableCacheSuite extends FunSuite{
       //order by cntrycode""")
 
       if(collect) res6.collect()
-      else res6.count()
+      else println("Result count is " + res6.count())
     }
   }
 
 
   test("Create Hive Table"){
-    System.setProperty("spark.sql.shuffle.partitions","2")
-    System.setProperty("hive.metastore.warehouse.dir", "/Users/zengdan/hive")
-    val conf = new SparkConf()
-    conf.setAppName("Create Table").setMaster("local")
-    val sc = new SparkContext(conf)
-    sc.hadoopConfiguration.set("fs.tachyon.impl","tachyon.hadoop.TFS")
+    //System.setProperty("spark.sql.shuffle.partitions","2")
+    //System.setProperty("hive.metastore.warehouse.dir", "/Users/zengdan/hive")
+    //val conf = new SparkConf()
+    //conf.setAppName("Create Table").setMaster("local")
+    //val sc = new SparkContext(conf)
+    //sc.hadoopConfiguration.set("fs.tachyon.impl","tachyon.hadoop.TFS")
 
-    val sqlContext = new org.apache.spark.sql.hive.HiveContext(sc)
+    //val sqlContext = new org.apache.spark.sql.hive.HiveContext(sc)
     val path = "hdfs://localhost:9000/user/zengdan/tpch"
 
     val lineitem = sqlContext.sql("create external table if not exists  lineitem (l_orderkey int, l_partkey int, l_suppkey int, " +

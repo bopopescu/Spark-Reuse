@@ -19,8 +19,9 @@ package org.apache.spark.sql.execution.joins
 
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.ScalaReflection
+import org.apache.spark.sql.catalyst.expressions.Row
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans.logical.QNodeRef
 import org.apache.spark.sql.catalyst.plans.physical.{ClusteredDistribution, Partitioning}
@@ -41,37 +42,50 @@ case class ShuffledHashJoin(
     right: SparkPlan,
     optionRef: Option[QNodeRef] = None)
   extends BinaryNode with HashJoin {
-  this.nodeRef = optionRef
+  //this.nodeRef = optionRef
+
+  override def operatorMatch(plan: SparkPlan):Boolean = {
+    plan match{
+      case hj: HashJoin =>
+        (this.compareExpressions(leftKeys, hj.leftKeys) &&
+          this.compareExpressions(rightKeys, hj.rightKeys)) ||
+          (this.compareExpressions(leftKeys, hj.rightKeys) &&
+            this.compareExpressions(rightKeys, hj.leftKeys))
+      case _ => false
+    }
+  }
 
   override def outputPartitioning: Partitioning = left.outputPartitioning
 
   override def requiredChildDistribution =
     ClusteredDistribution(leftKeys) :: ClusteredDistribution(rightKeys) :: Nil
 
-  override def execute() = {
-    if(buildPlan.isInstanceOf[Exchange])
-      buildPlan.nodeRef = this.nodeRef
-    if(streamedPlan.isInstanceOf[Exchange])
-      streamedPlan.nodeRef = this.nodeRef
-    val shouldCollect = nodeRef.isDefined && nodeRef.get.collect
-    var newRdd = if(!shouldCollect) {
+  override def execute():RDD[Row] = {
+    //if(buildPlan.isInstanceOf[Exchange])
+    //  buildPlan.nodeRef = this.nodeRef
+    //if(streamedPlan.isInstanceOf[Exchange])
+    //  streamedPlan.nodeRef = this.nodeRef
+
+    val loaded = sqlContext.loadData(output, nodeRef)
+    if(loaded.isDefined){
+      loaded.get
+    }else {
+      val shouldCollect = nodeRef.isDefined && nodeRef.get.collect
+      val newRdd = if (!shouldCollect) {
         buildPlan.execute().zipPartitions(streamedPlan.execute()) { (buildIter, streamIter) =>
-        val hashed = HashedRelation(buildIter, buildSideKeyGenerator)
-        hashJoin(streamIter, hashed)
-      }
-    }else{
-      buildPlan.execute().zipPartitions(streamedPlan.execute()) { (buildIter, streamIter) =>
-        val (hashed, partialTime) = HashedRelation.createRelation(buildIter, buildSideKeyGenerator)
-        time += partialTime
-        hashJoinWithCollect(streamIter, hashed)
-      }
-    }
+          val hashed = HashedRelation(buildIter, buildSideKeyGenerator)
+          hashJoin(streamIter, hashed)
+        }
+      } else {
+        buildPlan.execute().zipPartitions(streamedPlan.execute()) { (buildIter, streamIter) =>
 
+          val (hashed, partialTime) = HashedRelation.createRelation(buildIter, buildSideKeyGenerator)
+          time += partialTime
+          hashJoinWithCollect(streamIter, hashed)
+        }
+      }
 
-    if (nodeRef.isDefined && nodeRef.get.cache) {
-      newRdd.cacheID = Some(nodeRef.get.id)
-      newRdd = SQLContext.cacheData(newRdd, output, nodeRef.get.id)
+      cacheData(newRdd, output, nodeRef)
     }
-    newRdd
   }
 }

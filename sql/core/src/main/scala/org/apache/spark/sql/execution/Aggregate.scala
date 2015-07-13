@@ -20,6 +20,7 @@ package org.apache.spark.sql.execution
 import java.util.HashMap
 
 import org.apache.spark.annotation.DeveloperApi
+import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.{SparkEnv, SparkContext}
 import org.apache.spark.sql.catalyst.errors._
@@ -50,13 +51,19 @@ case class Aggregate(
     child: SparkPlan, optionRef: Option[QNodeRef] = None)
   extends UnaryNode {
 
-  //id = optionId
-  nodeRef = optionRef
-  if(!partial)
-    child.nodeRef = optionRef
+  //nodeRef = optionRef
+  //if(!partial)
+  //  child.nodeRef = optionRef
+
+  override def operatorMatch(plan: SparkPlan):Boolean = plan match{
+      case agg: Aggregate => this.partial == agg.partial &&
+        this.compareExpressions(groupingExpressions, agg.groupingExpressions) &&
+        this.compareExpressions(aggregateExpressions, agg.aggregateExpressions)
+      case _ => false
+  }
 
   //zengdan
-  @transient lazy val (fixedSize, stringIndexes) = if(partial) (0,Nil) else outputSize(output)
+  @transient lazy val (fixedSize: Int, varIndexes: List[Int]) = outputSize(output) //if(partial) (0,Nil) else
 
   override def requiredChildDistribution =
     if (partial) {
@@ -166,15 +173,31 @@ case class Aggregate(
     hashTable
   }
 
-  override def execute() = attachTree(this, "execute") {
+  override def execute():RDD[Row] = attachTree(this, "execute") {
       if (groupingExpressions.isEmpty) {
-        val shouldCollect = nodeRef.isDefined && nodeRef.get.collect
-        var newRdd = if(shouldCollect) {
-          child.execute().mapPartitions { iter =>
-            var start = System.nanoTime()
-            val buffer = newAggregateBuffer()
-            time += (System.nanoTime() - start)
-            var currentRow: Row = null
+        val loaded = sqlContext.loadData(output, nodeRef)
+        if(loaded.isDefined){
+          loaded.get
+        }else {
+          val shouldCollect = nodeRef.isDefined && nodeRef.get.collect
+          val newRdd = if (shouldCollect) {
+            child.execute().mapPartitions { iter =>
+              var start = System.nanoTime()
+              val buffer = newAggregateBuffer()
+              time += (System.nanoTime() - start)
+              var currentRow: Row = null
+              while (iter.hasNext) {
+                currentRow = iter.next()
+                start = System.nanoTime()
+                var i = 0
+                while (i < buffer.length) {
+                  buffer(i).update(currentRow)
+                  i += 1
+                }
+                time += (System.nanoTime() - start)
+              }
+
+              /*
             if(partial){ //don't collect the time of reading parent data
               while (iter.hasNext) {
                 currentRow = iter.next()
@@ -198,198 +221,205 @@ case class Aggregate(
               }
               time += (System.nanoTime() - start)
             }
+            */
 
-            start = System.nanoTime()
-            val resultProjection = new InterpretedProjection(resultExpressions, computedSchema)
-            val aggregateResults = new GenericMutableRow(computedAggregates.length)
+              start = System.nanoTime()
+              val resultProjection = new InterpretedProjection(resultExpressions, computedSchema)
+              val aggregateResults = new GenericMutableRow(computedAggregates.length)
 
-            var i = 0
-            while (i < buffer.length) {
-              aggregateResults(i) = buffer(i).eval(EmptyRow)
-              i += 1
-            }
-            val result = resultProjection(aggregateResults)
-            time += (System.nanoTime() - start)
-            rowCount = 1
-            for (index <- stringIndexes) {
-              avgSize += result.getString(index).length
-            }
-            avgSize += fixedSize
+              var i = 0
+              while (i < buffer.length) {
+                aggregateResults(i) = buffer(i).eval(EmptyRow)
+                i += 1
+              }
+              val result = resultProjection(aggregateResults)
+              time += (System.nanoTime() - start)
+              rowCount = 1
+              for (index <- varIndexes) {
+                //sizeInBytes += result.getString(index).length
+                avgSize += output(index).dataType.size(result, index)
+              }
+              avgSize += fixedSize
 
-            //if(!partialCollect) {
-            var statistics = Stats.statistics.get()
-            if (statistics == null) {
-              statistics = Map[Int, Array[Int]]()
-              Stats.statistics.set(statistics)
-            }
-            logDebug(s"Aggregate: $time, $rowCount, $avgSize")
+              //if(!partialCollect) {
+              var statistics = Stats.statistics.get()
+              if (statistics == null) {
+                statistics = Map[Int, Array[Int]]()
+                Stats.statistics.set(statistics)
+              }
+              logDebug(s"Aggregate: $time, $rowCount, $avgSize")
+              statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, avgSize * rowCount))
+              /*
             if (partial)
               statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, 0))
             else {
               statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, avgSize * rowCount))
             }
+            */
 
-            Iterator(result)
-          }
-        }else{
-          child.execute().mapPartitions { iter =>
-            val buffer = newAggregateBuffer()
-            var currentRow: Row = null
-            while (iter.hasNext) {
-              currentRow = iter.next()
+              Iterator(result)
+            }
+          } else {
+            child.execute().mapPartitions { iter =>
+              val buffer = newAggregateBuffer()
+              var currentRow: Row = null
+              while (iter.hasNext) {
+                currentRow = iter.next()
+                var i = 0
+                while (i < buffer.length) {
+                  buffer(i).update(currentRow)
+                  i += 1
+                }
+              }
+              val resultProjection = new InterpretedProjection(resultExpressions, computedSchema)
+              val aggregateResults = new GenericMutableRow(computedAggregates.length)
+
               var i = 0
               while (i < buffer.length) {
-                buffer(i).update(currentRow)
+                aggregateResults(i) = buffer(i).eval(EmptyRow)
                 i += 1
               }
-            }
-            val resultProjection = new InterpretedProjection(resultExpressions, computedSchema)
-            val aggregateResults = new GenericMutableRow(computedAggregates.length)
 
-            var i = 0
-            while (i < buffer.length) {
-              aggregateResults(i) = buffer(i).eval(EmptyRow)
-              i += 1
+              Iterator(resultProjection(aggregateResults))
             }
-
-            Iterator(resultProjection(aggregateResults))
           }
+          cacheData(newRdd, output, nodeRef)
         }
-
-        if(nodeRef.isDefined && nodeRef.get.cache && !partial){
-          newRdd.cacheID = Some(nodeRef.get.id)
-          //newRdd = newRdd.sparkContext.saveAndLoadOperatorFile[Row](newRdd.cacheID.get,
-          //  newRdd.map(ScalaReflection.convertRowToScala(_, schema)))
-          newRdd = SQLContext.cacheData(newRdd, output, nodeRef.get.id)
-        }
-        newRdd
       } else {
-        val shouldCollect = nodeRef.isDefined && nodeRef.get.collect
-        var newRdd = if(shouldCollect){
-          if(!partial)
-            child.nodeRef = nodeRef
-          child.execute().mapPartitions { iter =>
-            val hashTable = if(partial)getHashTable(iter, true) else{
+        val loaded = sqlContext.loadData(output, nodeRef)
+        if(loaded.isDefined){
+          loaded.get
+        }else {
+          val shouldCollect = nodeRef.isDefined && nodeRef.get.collect
+          val newRdd = if (shouldCollect) {
+            child.execute().mapPartitions { iter =>
+              val hashTable = getHashTable(iter, true)
+              /*
+            if(partial)getHashTable(iter, true) else{
               val start = System.nanoTime()
               val table = getHashTable(iter)
               time += (System.nanoTime() - start)
               table
             }
+            */
 
-            new Iterator[Row] {
-              val start = System.nanoTime()
-              private[this] val hashTableIter = hashTable.entrySet().iterator()
-              private[this] val aggregateResults = new GenericMutableRow(computedAggregates.length)
-              private[this] val resultProjection =
-                new InterpretedMutableProjection(
-                  resultExpressions, computedSchema ++ namedGroups.map(_._2))
-              private[this] val joinedRow = new JoinedRow4
-              time += (System.nanoTime() - start)
+              new Iterator[Row] {
+                val start = System.nanoTime()
+                private[this] val hashTableIter = hashTable.entrySet().iterator()
+                private[this] val aggregateResults = new GenericMutableRow(computedAggregates.length)
+                private[this] val resultProjection =
+                  new InterpretedMutableProjection(
+                    resultExpressions, computedSchema ++ namedGroups.map(_._2))
+                private[this] val joinedRow = new JoinedRow4
+                time += (System.nanoTime() - start)
 
-              override final def hasNext: Boolean = {
-                val continue = hashTableIter.hasNext
-                if (!continue && rowCount != 0) {
-                  avgSize = (fixedSize + avgSize / rowCount)
-                  logDebug(s"Aggregate: $time, $rowCount, $avgSize")
-                  var statistics = Stats.statistics.get()
-                  if (statistics == null) {
-                    statistics = Map[Int, Array[Int]]()
-                    Stats.statistics.set(statistics)
-                  }
+                override final def hasNext: Boolean = {
+                  val continue = hashTableIter.hasNext
+                  if (!continue && rowCount != 0) {
+                    avgSize = (fixedSize + avgSize / rowCount)
+                    logDebug(s"Aggregate: $time, $rowCount, $avgSize")
+                    var statistics = Stats.statistics.get()
+                    if (statistics == null) {
+                      statistics = Map[Int, Array[Int]]()
+                      Stats.statistics.set(statistics)
+                    }
+                    statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, avgSize * rowCount))
+                    /*
                   if(partial) {
                     statistics.put(nodeRef.get.id, Array((time/1e6).toInt, 0))
                   }else
                     statistics.put(nodeRef.get.id, Array((time/1e6).toInt, avgSize * rowCount))
+                  */
+                  }
+                  continue
                 }
-                continue
-              }
 
-              override final def next(): Row = {
-                val begin = System.nanoTime()
-                val currentEntry = hashTableIter.next()
-                val currentGroup = currentEntry.getKey
-                val currentBuffer = currentEntry.getValue
+                override final def next(): Row = {
+                  val begin = System.nanoTime()
+                  val currentEntry = hashTableIter.next()
+                  val currentGroup = currentEntry.getKey
+                  val currentBuffer = currentEntry.getValue
+
+                  var i = 0
+                  while (i < currentBuffer.length) {
+                    // Evaluating an aggregate buffer returns the result.  No row is required since we
+                    // already added all rows in the group using update.
+                    aggregateResults(i) = currentBuffer(i).eval(EmptyRow)
+                    i += 1
+                  }
+                  val result = resultProjection(joinedRow(aggregateResults, currentGroup))
+                  time += (System.nanoTime() - begin)
+                  rowCount += 1
+                  ///*
+                  for (index <- varIndexes) {
+                    //sizeInBytes += result.getString(index).length
+                    avgSize += output(index).dataType.size(result, index)
+                  }
+                  //*/
+                  result
+                }
+              }
+            }
+          } else {
+            child.execute().mapPartitions { iter =>
+              val hashTable = new HashMap[Row, Array[AggregateFunction]]
+              val groupingProjection = new InterpretedMutableProjection(groupingExpressions, childOutput)
+
+              var currentRow: Row = null
+              while (iter.hasNext) {
+                currentRow = iter.next()
+                val currentGroup = groupingProjection(currentRow)
+                var currentBuffer = hashTable.get(currentGroup)
+                if (currentBuffer == null) {
+                  currentBuffer = newAggregateBuffer()
+                  hashTable.put(currentGroup.copy(), currentBuffer)
+                }
 
                 var i = 0
                 while (i < currentBuffer.length) {
-                  // Evaluating an aggregate buffer returns the result.  No row is required since we
-                  // already added all rows in the group using update.
-                  aggregateResults(i) = currentBuffer(i).eval(EmptyRow)
+                  currentBuffer(i).update(currentRow)
                   i += 1
                 }
-                val result = resultProjection(joinedRow(aggregateResults, currentGroup))
-                time += (System.nanoTime() - begin)
-                rowCount += 1
-                for (index <- stringIndexes) {
-                  avgSize += result.getString(index).length
+              }
+
+              new Iterator[Row] {
+                private[this] val hashTableIter = hashTable.entrySet().iterator()
+                private[this] val aggregateResults = new GenericMutableRow(computedAggregates.length)
+                private[this] val resultProjection =
+                  new InterpretedMutableProjection(
+                    resultExpressions, computedSchema ++ namedGroups.map(_._2))
+                private[this] val joinedRow = new JoinedRow4
+
+                override final def hasNext: Boolean = hashTableIter.hasNext
+
+                override final def next(): Row = {
+                  val currentEntry = hashTableIter.next()
+                  val currentGroup = currentEntry.getKey
+                  val currentBuffer = currentEntry.getValue
+
+                  var i = 0
+                  while (i < currentBuffer.length) {
+                    // Evaluating an aggregate buffer returns the result.  No row is required since we
+                    // already added all rows in the group using update.
+                    aggregateResults(i) = currentBuffer(i).eval(EmptyRow)
+                    i += 1
+                  }
+                  resultProjection(joinedRow(aggregateResults, currentGroup))
                 }
-                result
               }
             }
           }
-        }else {
-          child.execute().mapPartitions { iter =>
-            //val hashTable = getHashTable(iter)
-            //val start = System.nanoTime()
-            val hashTable = new HashMap[Row, Array[AggregateFunction]]
-            val groupingProjection = new InterpretedMutableProjection(groupingExpressions, childOutput)
-            //if(collect)
-            //  time += (System.nanoTime() - start)
-
-            var currentRow: Row = null
-            while (iter.hasNext) {
-              currentRow = iter.next()
-              //val start = System.nanoTime()
-              val currentGroup = groupingProjection(currentRow)
-              var currentBuffer = hashTable.get(currentGroup)
-              if (currentBuffer == null) {
-                currentBuffer = newAggregateBuffer()
-                hashTable.put(currentGroup.copy(), currentBuffer)
-              }
-
-              var i = 0
-              while (i < currentBuffer.length) {
-                currentBuffer(i).update(currentRow)
-                i += 1
-              }
-              //if(collect)
-              //  time += (System.nanoTime() - start)
-            }
-
-            new Iterator[Row] {
-              private[this] val hashTableIter = hashTable.entrySet().iterator()
-              private[this] val aggregateResults = new GenericMutableRow(computedAggregates.length)
-              private[this] val resultProjection =
-                new InterpretedMutableProjection(
-                  resultExpressions, computedSchema ++ namedGroups.map(_._2))
-              private[this] val joinedRow = new JoinedRow4
-
-              override final def hasNext: Boolean = hashTableIter.hasNext
-
-              override final def next(): Row = {
-                val currentEntry = hashTableIter.next()
-                val currentGroup = currentEntry.getKey
-                val currentBuffer = currentEntry.getValue
-
-                var i = 0
-                while (i < currentBuffer.length) {
-                  // Evaluating an aggregate buffer returns the result.  No row is required since we
-                  // already added all rows in the group using update.
-                  aggregateResults(i) = currentBuffer(i).eval(EmptyRow)
-                  i += 1
-                }
-                resultProjection(joinedRow(aggregateResults, currentGroup))
-              }
-            }
-          }
+          cacheData(newRdd, output, nodeRef)
         }
 
+        /*
         if(nodeRef.isDefined && nodeRef.get.cache && !partial){
-          newRdd.cacheID = Some(nodeRef.get.id)
+          //newRdd.cacheID = Some(nodeRef.get.id)
           //newRdd = newRdd.sparkContext.saveAndLoadOperatorFile[Row](newRdd.cacheID.get, newRdd.map(ScalaReflection.convertRowToScala(_, schema)))
-          newRdd = SQLContext.cacheData(newRdd, output, nodeRef.get.id)
+          newRdd = sqlContext.cacheOrLoadData(newRdd, output, nodeRef.get.id)._1
         }
         newRdd
+        */
       }
   }
 }

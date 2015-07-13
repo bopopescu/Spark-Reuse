@@ -44,20 +44,6 @@ private[sql] object InMemoryRelation {
       child: SparkPlan,
       tableName: Option[String]): InMemoryRelation =
     new InMemoryRelation(child.output, useCompression, batchSize, storageLevel, child, tableName)()
-
-  def apply(
-             useCompression: Boolean,
-             batchSize: Int,
-             storageLevel: StorageLevel,
-             query: SchemaRDD,
-             tableName: Option[String]): InMemoryRelation = {
-    //query.sqlContext.qgDriver.rewritePlan(query.queryExecution.optimizedPlan)
-    //QueryGraph.qg.planRewritten(query.queryExecution.optimizedPlan)
-    val child = query.queryExecution.executedPlan
-    val relation = new InMemoryRelation(child.output, useCompression, batchSize, storageLevel, child, tableName)()
-    relation.nodeRef = query.queryExecution.optimizedPlan.nodeRef
-    relation
-  }
 }
 
 private[sql] case class CachedBatch(buffers: Array[Array[Byte]], stats: Row)
@@ -73,7 +59,7 @@ private[sql] case class InMemoryRelation(
     private var _statistics: Statistics = null)
   extends LogicalPlan with MultiInstanceRelation {
 
-  this.nodeRef = child.nodeRef
+  //this.nodeRef = child.nodeRef
 
   private val batchStats =
     child.sqlContext.sparkContext.accumulableCollection(ArrayBuffer.empty[Row])
@@ -168,7 +154,7 @@ private[sql] case class InMemoryRelation(
     val result = InMemoryRelation(
       newOutput, useCompression, batchSize, storageLevel, child, tableName)(
       _cachedColumnBuffers, statisticsToBePropagated)
-    result.nodeRef = this.nodeRef
+    //result.child.nodeRef = this.child.nodeRef
     result
   }
 
@@ -198,12 +184,9 @@ private[sql] case class InMemoryColumnarTableScan(
     relation: InMemoryRelation)
   extends LeafNode {
 
-  @transient override val sqlContext = relation.child.sqlContext
+  @transient override lazy val sqlContext = relation.child.sqlContext
 
   override def output: Seq[Attribute] = attributes
-
-  //zengdan
-  lazy val (fixedSize, stringIndexes) = outputSize(output)
 
   private def statsFor(a: Attribute) = relation.partitionStatistics.forAttribute(a)
 
@@ -343,123 +326,5 @@ private[sql] case class InMemoryColumnarTableScan(
 
       cachedBatchesToRows(cachedBatchesToScan)
     }
-    /*
-    var newRdd = relation.cachedColumnBuffers.mapPartitions { cachedBatchIterator =>
-      val start = System.nanoTime()
-      val partitionFilter = newPredicate(
-        partitionFilters.reduceOption(And).getOrElse(Literal(true)),
-        relation.partitionStatistics.schema)
-
-      // Find the ordinals and data types of the requested columns.  If none are requested, use the
-      // narrowest (the field with minimum default element size).
-      val (requestedColumnIndices, requestedColumnDataTypes) = if (attributes.isEmpty) {
-        val (narrowestOrdinal, narrowestDataType) =
-          relation.output.zipWithIndex.map { case (a, ordinal) =>
-            ordinal -> a.dataType
-          } minBy { case (_, dataType) =>
-            ColumnType(dataType).defaultSize
-          }
-        Seq(narrowestOrdinal) -> Seq(narrowestDataType)
-      } else {
-        attributes.map { a =>
-          relation.output.indexWhere(_.exprId == a.exprId) -> a.dataType
-        }.unzip
-      }
-
-      val nextRow = new SpecificMutableRow(requestedColumnDataTypes)
-
-      if(collectInfo)
-        time += (System.nanoTime() - start)
-
-      def cachedBatchesToRows(cacheBatches: Iterator[CachedBatch]) = {
-        val rows = cacheBatches.flatMap { cachedBatch =>
-          // Build column accessors
-          val start = System.nanoTime()
-          val columnAccessors = requestedColumnIndices.map { batch =>
-            ColumnAccessor(ByteBuffer.wrap(cachedBatch.buffers(batch)))
-          }
-
-          if(collectInfo)
-            time += (System.nanoTime() - start)
-
-          // Extract rows via column accessors
-          new Iterator[Row] {
-            override def next() = {
-              val start = System.nanoTime()
-              var i = 0
-              while (i < nextRow.length) {
-                columnAccessors(i).extractTo(nextRow, i)
-                i += 1
-              }
-              if(collectInfo) {
-                time += (System.nanoTime() - start)
-                rowCount += 1
-                for (index <- stringIndexes) {
-                  //sizeInBytes += result.getString(index).length
-                  avgSize += nextRow.getString(index).length
-                }
-              }
-              nextRow
-            }
-
-            override def hasNext = columnAccessors(0).hasNext
-          }
-        }
-
-        if (rows.hasNext) {
-          readPartitions += 1
-        }else{
-          //stats collect
-          if (rowCount != 0 && collectInfo) {
-            avgSize = (fixedSize + avgSize/rowCount)
-            logDebug(s"InMemoryTableScan ${nodeRef.get.id}: $time, $rowCount, $avgSize")
-            var statistics = Stats.statistics.get()
-            if (statistics == null) {
-              statistics = Map[Int, Array[Int]]()
-              Stats.statistics.set(statistics)
-            }
-            statistics.put(nodeRef.get.id, Array((time/1e6).toInt, avgSize*rowCount))
-          }
-        }
-        rows
-      }
-
-      // Do partition batch pruning if enabled
-      val cachedBatchesToScan =
-        if (inMemoryPartitionPruningEnabled) {
-          cachedBatchIterator.filter { cachedBatch =>
-            val start = System.nanoTime()
-            val read = partitionFilter(cachedBatch.stats)
-            if(collectInfo)
-              time += (System.nanoTime() - start)
-            if (!read) {
-              def statsString = relation.partitionStatistics.schema
-                .zip(cachedBatch.stats)
-                .map { case (a, s) => s"${a.name}: $s" }
-                .mkString(", ")
-              logInfo(s"Skipping partition based on stats $statsString")
-              false
-            } else {
-              readBatches += 1
-              true
-            }
-          }
-        } else {
-          cachedBatchIterator
-        }
-
-      cachedBatchesToRows(cachedBatchesToScan)
-    }
-
-    /*
-    if (collectInfo && nodeRef.get.cache) {
-      newRdd.cacheID = Some(nodeRef.get.id)
-      //newRdd = newRdd.sparkContext.saveAndLoadOperatorFile[Row](newRdd.cacheID.get,
-      //  newRdd.map(ScalaReflection.convertRowToScala(_, schema)))
-      newRdd = SQLContext.cacheData(newRdd, output, nodeRef.get.id)
-    }
-    */
-    newRdd
-    */
   }
 }

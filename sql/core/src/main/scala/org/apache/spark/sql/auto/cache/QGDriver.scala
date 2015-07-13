@@ -6,6 +6,7 @@ package org.apache.spark.sql.auto.cache
 
 import java.io.{DataOutputStream, ByteArrayOutputStream}
 import java.nio.ByteBuffer
+import java.util
 import java.util.HashMap
 import akka.actor.SupervisorStrategy.Stop
 import akka.actor._
@@ -19,23 +20,24 @@ import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.plans.logical.QNodeRef
 import org.apache.spark.sql.auto.cache.QGMasterMessages._
+import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.storage.BlockManagerMessages.{UpdateBlockInfo, RemoveRdd}
 import org.apache.spark.util.{SerializableBuffer, Utils, SignalLogger, AkkaUtils}
 import scala.collection.mutable.Map
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future}
-import org.apache.spark.sql.auto.cache.QGUtils.PlanDesc
+import org.apache.spark.sql.auto.cache.QGUtils.{PlanDesc, PlanUpdate}
 
 class QGDriver(sc: SparkContext) extends Actor with Logging{
 
   //public
-  private var qgactor: ActorRef = _
+  private var qgmaster: ActorRef = _
   private val conf = sc.getConf
 
   override def preStart() = {
     val timeout = AkkaUtils.lookupTimeout(conf)
-    qgactor = Await.result(context.actorSelection(QGMaster.toAkkaUrl).resolveOne(timeout), timeout)
-    logInfo(s"Actor address in QGDriver is ${qgactor}")
+    qgmaster = Await.result(context.actorSelection(QGMaster.toAkkaUrl).resolveOne(timeout), timeout)
+    logInfo(s"Actor address in QGDriver is ${qgmaster}")
     context.system.eventStream.subscribe(self, classOf[RemotingLifecycleEvent])
   }
 
@@ -45,30 +47,44 @@ class QGDriver(sc: SparkContext) extends Actor with Logging{
       sender ! rewritePlan(planDesc)
 
     case UpdateInfo(stats) =>
+      logInfo("Update Statistics in QGDriver")
       sender ! updateStats(stats)
+
+    case CacheFailed(id) =>
+      logInfo("Cache Failed in QGDriver")
+      sender ! cacheFailed(id)
 
     case RemoveJars(jars) =>
       logInfo("Remove jars in QGDriver")
       sender ! askMasterWithReply[Boolean](RemoveJars(jars))
-      //qgactor ! RemoveJars(sc.addedJars)
 
     case AssociatedEvent(localAddress, remoteAddress, inbound) =>
       logInfo(s"Successfully connected to $remoteAddress")
 
     case DisassociatedEvent(_, address, _) => {
-      //qgactor ! RemoveJars(sc.addedJars)
       logInfo(s"$address got disassociated.")
 
     }
   }
 
   override def postStop() {
-    qgactor ! RemoveJars(sc.addedJars)
-    println("QGDriver in postStop")
+    qgmaster ! RemoveJars(sc.addedJars)
+    logInfo("PostStop in QGDriver")
   }
 
+  /*
   def rewritePlan(planDesc: PlanDesc): HashMap[Int, QNodeRef] = {
     askMasterWithReply[HashMap[Int, QNodeRef]](MatchSerializedPlan(planDesc))
+  }
+  */
+  ///*
+  def rewritePlan(planDesc: PlanDesc): PlanUpdate = {
+    askMasterWithReply[PlanUpdate](MatchSerializedPlan(planDesc))
+  }
+  //*/
+
+  def cacheFailed(id: Int):Boolean = {
+    askMasterWithReply[Boolean](CacheFailed(id))
   }
 
   def updateStats(stats: Map[Int, Array[Long]]) = {
@@ -77,7 +93,7 @@ class QGDriver(sc: SparkContext) extends Actor with Logging{
 
   private def askMasterWithReply[T](message: Any): T = {
     val timeout = Duration.create(conf.get("spark.sql.auto.cache.ask.timeout","60").toLong, "seconds")
-    AkkaUtils.askWithReply[T](message, qgactor,
+    AkkaUtils.askWithReply[T](message, qgmaster,
       AkkaUtils.numRetries(conf), AkkaUtils.retryWaitMs(conf), timeout)
   }
 
@@ -93,19 +109,22 @@ object QGDriver{
     (actorSystem, actorSystem.actorOf(Props(new QGDriver(sc)), "QGDriver"))
   }
 
-  def rewrittenPlan(plan: LogicalPlan, sqlContext: SQLContext, actor: ActorRef): HashMap[Int, QNodeRef] = {
+  def rewrittenPlan(plan: SparkPlan, sqlContext: SQLContext, actor: ActorRef): PlanUpdate = {
     //QueryGraph.qg.planRewritten(plan)
     ///*
     val conf = sqlContext.sparkContext.getConf
+    val appId = sqlContext.sparkContext.applicationId  //make subdir in qgmaster to store jars
 
     val serializer = sqlContext.serializer
 
     val planBuffer = ByteBuffer.wrap(serializer.newInstance().serialize(plan).array())
-    val plandesc = new PlanDesc(sqlContext.sparkContext.addedJars, new SerializableBuffer(planBuffer))
+    val plandesc = new PlanDesc(appId, sqlContext.sparkContext.addedJars, new SerializableBuffer(planBuffer))
 
     val timeout = Duration.create(conf.get("spark.sql.auto.cache.ask.timeout", "60").toLong, "seconds")
     val message = MatchSerializedPlan(plandesc)
-    AkkaUtils.askWithReply[HashMap[Int, QNodeRef]](message, actor,
+    //AkkaUtils.askWithReply[HashMap[Int, QNodeRef]](message, actor,
+    //  AkkaUtils.numRetries(conf), AkkaUtils.retryWaitMs(conf), timeout)
+    AkkaUtils.askWithReply[PlanUpdate](message, actor,
       AkkaUtils.numRetries(conf), AkkaUtils.retryWaitMs(conf), timeout)
     //*/
   }
@@ -117,6 +136,10 @@ object QGDriver{
       AkkaUtils.numRetries(conf), AkkaUtils.retryWaitMs(conf), timeout)
   }
 
+  def cacheFailed(operatorId: Int, actor: ActorRef) = {
+    actor ! CacheFailed(operatorId)
+  }
+
   def removeJars(sqlContext: SQLContext, actor: ActorRef): Boolean = {
     val sc = sqlContext.sparkContext
     val conf = sc.getConf
@@ -124,6 +147,5 @@ object QGDriver{
     AkkaUtils.askWithReply[Boolean](RemoveJars(sc.addedJars), actor,
       AkkaUtils.numRetries(conf), AkkaUtils.retryWaitMs(conf), timeout)
   }
-
 
 }

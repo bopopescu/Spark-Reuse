@@ -35,6 +35,7 @@ import org.apache.spark.serializer.Serializer
 
 import org.apache.spark.sql.auto.cache.QGMasterMessages._
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.storage.TachyonBlockManager
 import org.apache.spark.util._
 import org.apache.spark._
@@ -86,25 +87,32 @@ private[spark] class QGMaster(
 
   override def receiveWithLogging = {
     case MatchSerializedPlan(planDesc) => {
-      logInfo("Got serializedplan to match in QGMaster")
-      updateDependencies(planDesc.jars)
-      val plan = serializer.newInstance().deserialize[LogicalPlan](planDesc.serializedPlan.value,
+      logInfo("MatchPlan in QGMaster")
+      updateDependencies(planDesc.appId, planDesc.jars)
+      val plan = serializer.newInstance().deserialize[SparkPlan](planDesc.serializedPlan.value,
         urlClassLoader)
-      val refs = QueryGraph.qg.planRewritten(plan)
-      sender ! refs
+      val updateInfo = QueryGraph.qg.planRewritten(plan)
+      sender ! updateInfo
     }
 
     case UpdateInfo(statistics) =>
+      logInfo("Update Statistics in QGMaster")
       QueryGraph.qg.updateStatistics(statistics)
       sender ! true
 
+    case CacheFailed(id) =>
+      logInfo("Cache Failed in QGMaster")
+      QueryGraph.qg.cacheFailed(id)
+      sender ! true
+
     case RemoveJars(jars) =>
-      logInfo("Got removeJars message in QGMaster")
+      logInfo("RemoveJars in QGMaster")
+
       for((name, time) <- jars){
         currentJars.remove(name)
         urlClassLoader = createClassLoader()
         val localName = name.split("/").last
-        val file = new File(getRootDir(), localName)
+        val file = new File(getRootDir(""), localName)
         if(file.exists()){
           file.delete()
         }
@@ -134,11 +142,11 @@ private[spark] class QGMaster(
   val securityManager = new SecurityManager(conf)
   var urlClassLoader = createClassLoader()
 
-  private def getRootDir(): String = {
+  private def getRootDir(appId: String): String = {
     var root = System.getenv("SPARK_HOME")
     if(root == null)
       root = System.getProperty("java.io.tmpdir")
-    createRootDir(root, "AutoCache").getAbsolutePath
+    createRootDir(root, "AutoCache/" + appId).getAbsolutePath
   }
 
   private def createRootDir(root: String, child: String): File = {
@@ -161,19 +169,19 @@ private[spark] class QGMaster(
     dir
   }
 
-  private def updateDependencies(newJars: HashMap[String, Long]) = {
+  private def updateDependencies(appId: String, newJars: HashMap[String, Long]) = {
     lazy val hadoopConf = SparkHadoopUtil.get.newConfiguration(conf)
     //synchronized {
       // Fetch missing dependencies
       for ((name, timestamp) <- newJars if currentJars.getOrElse(name, -1L) < timestamp) {
         logInfo("Fetching " + name + " with timestamp " + timestamp)
         // Fetch file with useCache mode, close cache for local mode.
-        Utils.fetchFile(name, new File(getRootDir()), conf,
+        Utils.fetchFile(name, new File(getRootDir(appId)), conf,
           securityManager, hadoopConf, timestamp, useCache = true)
         currentJars(name) = timestamp
         // Add it to our class loader
         val localName = name.split("/").last
-        val url = new File(getRootDir(), localName).toURI.toURL
+        val url = new File(getRootDir(appId), localName).toURI.toURL
         if (!urlClassLoader.getURLs.contains(url)) {
           logInfo("Adding " + url + " to class loader")
           urlClassLoader.addURL(url)

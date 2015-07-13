@@ -31,6 +31,8 @@ import org.apache.spark.sql.catalyst.trees
 import org.apache.spark.storage.{StorageLevel, BlockId, BlockManagerId}
 import org.apache.spark.util.Utils
 
+import scala.collection.mutable.ArrayBuffer
+
 
 /**
  * Estimates of various statistics.  The default estimation logic simply lazily multiplies the
@@ -47,7 +49,7 @@ import org.apache.spark.util.Utils
 private[sql] case class Statistics(sizeInBytes: BigInt)
 
 //zengdan
-case class QNodeRef(var id: Int, var cache: Boolean, var collect: Boolean)
+case class QNodeRef(var id: Int, var cache: Boolean, var collect: Boolean, var reuse: Boolean = false)
 
 
 abstract class LogicalPlan extends QueryPlan[LogicalPlan] with Logging with Serializable{
@@ -113,6 +115,8 @@ abstract class LogicalPlan extends QueryPlan[LogicalPlan] with Logging with Seri
       i != 0
     }
   }
+
+
 
   /**
    * Returns true when the given logical plan will return the same results as this logical plan.

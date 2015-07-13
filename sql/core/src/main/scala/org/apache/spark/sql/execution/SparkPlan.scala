@@ -31,6 +31,8 @@ import org.apache.spark.sql.catalyst.plans.physical._
 
 import org.apache.spark.sql.catalyst.types.{StringType, NativeType, DataType}
 
+import scala.collection.mutable.ArrayBuffer
+
 
 object SparkPlan {
   protected[sql] val currentContext = new ThreadLocal[SQLContext]()
@@ -49,8 +51,47 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
   protected[spark] var avgSize:Int = 0
   protected[spark] var time: Long = 0
   //protected[spark] var partialCollect: Boolean = false
-  //var id: Option[Int] = None
+  var id: Int = -1
   var nodeRef: Option[QNodeRef] = None
+
+  //zengdan
+  lazy val transformedExpressions: Seq[Expression] = {
+    val x = this.expressions.foldLeft(new ArrayBuffer[Expression]){
+      (buffers, expression) =>
+        buffers.append(expression.transformExpression())
+        buffers
+    }
+    x.toSeq
+  }
+
+  //zengdan
+  def operatorMatch(plan: SparkPlan):Boolean = {
+    //(plan.getClass == this.getClass) && compareExpressions(plan.expressions, this.expressions)
+    (plan.getClass == this.getClass) && compareExpressions(plan.transformedExpressions, this.transformedExpressions)
+  }
+
+  def compareExpressions(expr1: Seq[Expression], expr2: Seq[Expression]): Boolean ={
+    val e1 = expr1.map(_.treeStringByName).sortWith(_.compareTo(_) < 0)
+    val e2 = expr2.map(_.treeStringByName).sortWith(_.compareTo(_) < 0)
+
+    if(e1.length != e2.length)
+      false
+    else if(e1.length == 0)
+      true
+    else{
+      var i = 0
+      while(i < e1.length){
+        val x = e1(i)
+          //.treeStringByName
+        val y = e2(i)
+            //.treeStringByName
+        if(x.compareTo(y) != 0)
+          return false
+        i += 1
+      }
+      i != 0
+    }
+  }
 
 
   /**
@@ -58,8 +99,9 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
    * access to the sqlContext for RDD operations or configuration this field is automatically
    * populated by the query planning infrastructure.
    */
+  //zengdan add lazy
   @transient
-  protected[spark] val sqlContext = SparkPlan.currentContext.get()
+  protected[spark] lazy val sqlContext = SparkPlan.currentContext.get()
 
   protected def sparkContext = sqlContext.sparkContext
 
@@ -133,11 +175,22 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
         }else{
           fixedSize += tp
         }
-
+      }else{
+        varIndex = varIndex ::: List(i)
       }
       i+=1
     }
     (fixedSize, varIndex)
+  }
+
+  //zengdan
+  protected def cacheData(newRdd: RDD[Row], output: Seq[Attribute], nodeRef: Option[QNodeRef]):RDD[Row] = {
+    if(nodeRef.isDefined && nodeRef.get.cache) {
+      newRdd.cacheID = Some(nodeRef.get.id)
+      return sqlContext.cacheData(newRdd, output, nodeRef.get.id)
+    }else {
+      newRdd
+    }
   }
 
 

@@ -271,7 +271,7 @@ private[sql] abstract class SparkStrategies extends QueryPlanner[SparkPlan] {
         // an UnspecifiedDistribution.
         execution.Sort(sortExprs, global = false, planLater(child)) :: Nil
       case logical.Project(projectList, child) =>
-        execution.Project(projectList, planLater(child), plan.nodeRef) :: Nil
+        execution.Project(projectList, planLater(child)) :: Nil
       case logical.Filter(condition, child) =>
         execution.Filter(condition, planLater(child), plan.nodeRef) :: Nil
       case logical.Aggregate(group, agg, child) =>

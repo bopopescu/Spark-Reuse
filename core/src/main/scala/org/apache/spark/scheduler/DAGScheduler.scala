@@ -996,8 +996,11 @@ class DAGScheduler(
         stage.pendingTasks -= task
         //update statistics
         //zengdan
-        if(event.taskStatistics.isDefined)
+        if(event.taskStatistics.isDefined) {
+          val start = System.nanoTime()
           updateStatistics(event.taskStatistics.get)
+          logDebug(s"Time to update statistics is ${System.nanoTime() - start} ns.")
+        }
         task match {
           case rt: ResultTask[_, _] =>
             stage.resultOfJob match {

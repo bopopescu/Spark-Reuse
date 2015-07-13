@@ -17,9 +17,11 @@
 
 package org.apache.spark.rdd
 
-import java.text.SimpleDateFormat
+import java.text.{NumberFormat, SimpleDateFormat}
 import java.util.Date
 import java.io.EOFException
+
+import org.apache.hadoop.fs.FileSystem
 
 import scala.collection.immutable.Map
 import scala.reflect.ClassTag
@@ -198,6 +200,7 @@ class HadoopRDD[K, V](
     if (inputFormat.isInstanceOf[Configurable]) {
       inputFormat.asInstanceOf[Configurable].setConf(jobConf)
     }
+
     val inputSplits = inputFormat.getSplits(jobConf, minPartitions)
     val array = new Array[Partition](inputSplits.size)
     for (i <- 0 until inputSplits.size) {
@@ -311,6 +314,7 @@ class HadoopRDD[K, V](
         }
       case None => None
     }
+    logDebug("HadoopRDD getPreferredLocations for split %d is %s".format(split.index, hsplit.getLocations()(0)))
     locs.getOrElse(hsplit.getLocations.filter(_ != "localhost"))
   }
 

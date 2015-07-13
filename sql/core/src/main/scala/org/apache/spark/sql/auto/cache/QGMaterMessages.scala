@@ -4,12 +4,11 @@ import java.io.{ObjectInput, ObjectOutput, Externalizable}
 import java.nio.ByteBuffer
 
 import org.apache.spark.sql.auto.cache.QGUtils.PlanDesc
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.plans.logical.{QNodeRef, LogicalPlan}
 import org.apache.spark.storage.{StorageLevel, BlockId, BlockManagerId}
 import org.apache.spark.util.{SerializableBuffer, Utils}
 
-import scala.collection.mutable.Map
-import scala.collection.mutable.HashMap
+import scala.collection.mutable.{ArrayBuffer, Map, HashMap}
 
 /**
  * Created by zengdan on 15-3-23.
@@ -23,7 +22,9 @@ private object QGMasterMessages {
   // LeaderElectionAgent to Master
   case class MatchSerializedPlan(plan: PlanDesc)
   case class UpdateInfo(statistics: Map[Int, Array[Long]])
+  case class CacheFailed(operatorId: Int)
   case class RemoveJars(jars: HashMap[String, Long])
+
 
 }
 

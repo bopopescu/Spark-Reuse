@@ -22,7 +22,7 @@ import java.sql.{Date, Timestamp}
 
 //import org.apache.hadoop.hive.metastore.api.Table
 import org.apache.hadoop.hive.ql.metadata.Table
-import org.apache.spark.sql.auto.cache.QGDriver
+import org.apache.spark.sql.auto.cache.{QGMaster, QGDriver}
 
 import scala.collection.JavaConversions._
 import scala.language.implicitConversions
@@ -36,7 +36,7 @@ import org.apache.hadoop.hive.ql.processors._
 import org.apache.hadoop.hive.ql.session.SessionState
 import org.apache.hadoop.hive.serde2.io.{DateWritable, TimestampWritable}
 
-import org.apache.spark.SparkContext
+import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.sql.catalyst.analysis.{Analyzer, EliminateAnalysisOperators, OverrideCatalog, OverrideFunctionRegistry}

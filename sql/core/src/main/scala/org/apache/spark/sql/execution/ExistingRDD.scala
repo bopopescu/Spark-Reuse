@@ -82,75 +82,54 @@ case class LogicalRDD(output: Seq[Attribute], rdd: RDD[Row])(sqlContext: SQLCont
 
 case class PhysicalRDD(output: Seq[Attribute], rdd: RDD[Row], optionRef: Option[QNodeRef] = None) extends LeafNode {
   //this.id = optionId
-  this.nodeRef = optionRef
-  override def execute() = {
-    if(!nodeRef.isDefined){
-      rdd
-    }else{
-      var newRdd = if(!nodeRef.get.collect){
-        rdd
-      }else{
-        var fixedSize = 0
-        var varIndex: List[Int] = Nil
+  //this.nodeRef = optionRef
+  private lazy val (fixedSize, varIndexes) = outputSize(output)
 
-        var i = 0
-        while(i < output.length){
-          if (output(i).dataType.isInstanceOf[NativeType]) {
-            var tp = NativeType.defaultSizeOf(output(i).dataType.asInstanceOf[NativeType])
-            if (tp == 4096) {
-              varIndex = varIndex ::: List(i)
-            } else {
-              fixedSize += tp
-            }
-          }
-          i += 1
-        }
-
-        rdd.mapPartitions{iter =>
-          var statistics = Stats.statistics.get()
-          if(statistics == null) {  //no match in the query graph, so no need to collect information
-            statistics = Map[Int, Array[Int]]()
-            Stats.statistics.set(statistics)
-          }
-
-          new Iterator[Row]{
-            override def hasNext: Boolean = {
-              val start = System.nanoTime()
-              val continue = iter.hasNext
-              time += (System.nanoTime() - start)
-              if(!continue && rowCount != 0 && nodeRef.get.collect){
-                avgSize = (fixedSize + avgSize/rowCount)
-                println(s"ExistingRDD: $time, $rowCount, $avgSize")
-                statistics.put(nodeRef.get.id, Array((time/1e6).toInt, avgSize*rowCount))
-              }
-              continue
-            }
-
-            override def next = {
-              val start = System.nanoTime()
-              val mutableRow = iter.next()
-
-              time += (System.nanoTime() - start)
-              rowCount += 1
-              for(index <- varIndex){
-                avgSize += mutableRow.getString(index).length
-              }
-              mutableRow
-            }
-          }
-        }
-      }
-
-      if(nodeRef.get.cache) {
-        newRdd.cacheID = Some(nodeRef.get.id)
-        //newRdd = newRdd.sparkContext.saveAndLoadOperatorFile[Row](newRdd.cacheID.get,
-        //  newRdd.map(ScalaReflection.convertRowToScala(_, schema)))
-        newRdd = SQLContext.cacheData(newRdd, output, nodeRef.get.id)
-        //newRdd.persist(StorageLevel.OFF_HEAP)
-        //rdd.clearGlobalDependencies()
-      }
-      newRdd
+  override def execute():RDD[Row] = {
+    if(nodeRef.isDefined && nodeRef.get.reuse){
+      val loaded = sqlContext.loadData(output, nodeRef)
+      if(loaded.isDefined) return loaded.get
     }
+    val shouldCollect = nodeRef.isDefined && nodeRef.get.collect
+    val newRdd = if(shouldCollect){
+      rdd.mapPartitions{iter =>
+        var statistics = Stats.statistics.get()
+        if(statistics == null) {  //no match in the query graph, so no need to collect information
+          statistics = Map[Int, Array[Int]]()
+          Stats.statistics.set(statistics)
+        }
+
+        new Iterator[Row]{
+          override def hasNext: Boolean = {
+            val start = System.nanoTime()
+            val continue = iter.hasNext
+            time += (System.nanoTime() - start)
+            if(!continue && rowCount != 0 && nodeRef.get.collect){
+              avgSize = (fixedSize + avgSize/rowCount)
+              println(s"ExistingRDD: $time, $rowCount, $avgSize")
+              statistics.put(nodeRef.get.id, Array((time/1e6).toInt, avgSize*rowCount))
+            }
+            continue
+          }
+
+          override def next = {
+            val start = System.nanoTime()
+            val mutableRow = iter.next()
+
+            time += (System.nanoTime() - start)
+            rowCount += 1
+            for (index <- varIndexes) {
+              //sizeInBytes += result.getString(index).length
+              avgSize += output(index).dataType.size(mutableRow, index)
+            }
+            mutableRow
+          }
+        }
+      }
+    }else{
+      rdd
+    }
+    cacheData(newRdd, output, nodeRef)
   }
 }
 

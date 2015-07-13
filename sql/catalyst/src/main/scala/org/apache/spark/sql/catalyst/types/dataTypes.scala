@@ -19,6 +19,8 @@ package org.apache.spark.sql.catalyst.types
 
 import java.sql.{Date, Timestamp}
 
+import org.apache.spark.util.collection.OpenHashSet
+
 import scala.math.Numeric.{FloatAsIfIntegral, BigDecimalAsIfIntegral, DoubleAsIfIntegral}
 import scala.reflect.ClassTag
 import scala.reflect.runtime.universe.{TypeTag, runtimeMirror, typeTag}
@@ -216,6 +218,9 @@ abstract class DataType {
   def json: String = compact(render(jsonValue))
 
   def prettyJson: String = pretty(render(jsonValue))
+
+  //zengdan
+  def size(input: Row, index: Int):Int = 0
 }
 
 case object NullType extends DataType
@@ -271,6 +276,11 @@ case object StringType extends NativeType with PrimitiveType {
   private[sql] type JvmType = String
   @transient private[sql] lazy val tag = ScalaReflectionLock.synchronized { typeTag[JvmType] }
   private[sql] val ordering = implicitly[Ordering[JvmType]]
+
+  //zengdan
+  override def size(input: Row, index: Int): Int = {
+    input.getString(index).length
+  }
 }
 
 case object  BinaryType extends NativeType with PrimitiveType {
@@ -291,6 +301,9 @@ case object BooleanType extends NativeType with PrimitiveType {
   private[sql] type JvmType = Boolean
   @transient private[sql] lazy val tag = ScalaReflectionLock.synchronized { typeTag[JvmType] }
   private[sql] val ordering = implicitly[Ordering[JvmType]]
+
+  //zengdan
+  override def size(input: Row, index: Int): Int = 1
 }
 
 case object TimestampType extends NativeType {
@@ -344,6 +357,9 @@ case object LongType extends IntegralType {
   private[sql] val numeric = implicitly[Numeric[Long]]
   private[sql] val integral = implicitly[Integral[Long]]
   private[sql] val ordering = implicitly[Ordering[JvmType]]
+
+  //zengdan
+  override def size(input: Row, index: Int): Int = 8
 }
 
 case object IntegerType extends IntegralType {
@@ -352,6 +368,9 @@ case object IntegerType extends IntegralType {
   private[sql] val numeric = implicitly[Numeric[Int]]
   private[sql] val integral = implicitly[Integral[Int]]
   private[sql] val ordering = implicitly[Ordering[JvmType]]
+
+  //zengdan
+  override def size(input: Row, index: Int): Int = 4
 }
 
 case object ShortType extends IntegralType {
@@ -360,6 +379,9 @@ case object ShortType extends IntegralType {
   private[sql] val numeric = implicitly[Numeric[Short]]
   private[sql] val integral = implicitly[Integral[Short]]
   private[sql] val ordering = implicitly[Ordering[JvmType]]
+
+  //zengdan
+  override def size(input: Row, index: Int): Int = 2
 }
 
 case object ByteType extends IntegralType {
@@ -368,6 +390,9 @@ case object ByteType extends IntegralType {
   private[sql] val numeric = implicitly[Numeric[Byte]]
   private[sql] val integral = implicitly[Integral[Byte]]
   private[sql] val ordering = implicitly[Ordering[JvmType]]
+
+  //zengdan
+  override def size(input: Row, index: Int): Int = 1
 }
 
 /** Matcher for any expressions that evaluate to [[FractionalType]]s */
@@ -381,6 +406,7 @@ object FractionalType {
 abstract class FractionalType extends NumericType {
   private[sql] val fractional: Fractional[JvmType]
   private[sql] val asIntegral: Integral[JvmType]
+
 }
 
 /** Precision parameters for a Decimal */
@@ -444,6 +470,9 @@ case object DoubleType extends FractionalType {
   private[sql] val fractional = implicitly[Fractional[Double]]
   private[sql] val ordering = implicitly[Ordering[JvmType]]
   private[sql] val asIntegral = DoubleAsIfIntegral
+
+  //zengdan
+  override def size(input: Row, index: Int): Int = 8
 }
 
 case object FloatType extends FractionalType {
@@ -453,6 +482,9 @@ case object FloatType extends FractionalType {
   private[sql] val fractional = implicitly[Fractional[Float]]
   private[sql] val ordering = implicitly[Ordering[JvmType]]
   private[sql] val asIntegral = FloatAsIfIntegral
+
+  //zengdan
+  override def size(input: Row, index: Int): Int = 4
 }
 
 object ArrayType {
@@ -478,6 +510,15 @@ case class ArrayType(elementType: DataType, containsNull: Boolean) extends DataT
     ("type" -> typeName) ~
       ("elementType" -> elementType.jsonValue) ~
       ("containsNull" -> containsNull)
+
+  override def size(input: Row, index: Int): Int = {
+    val elem = input.getAs[Array[_]](index)
+    if(elem.isInstanceOf[OpenHashSet[_]]){
+      elem.asInstanceOf[OpenHashSet[_]].size*elementType.size(input, index)
+    }else{
+      elem.size*elementType.size(input, index)
+    }
+  }
 }
 
 /**

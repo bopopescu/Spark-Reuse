@@ -44,3 +44,23 @@ class SerializableWritable[T <: Writable](@transient var t: T) extends Serializa
     t = ow.get().asInstanceOf[T]
   }
 }
+
+//zengdan
+class SerializableArrayWritable[T <: Writable](@transient var t: Array[T]) extends Serializable {
+  def value = t
+  override def toString = t.toString
+
+  private def writeObject(out: ObjectOutputStream): Unit = Utils.tryOrIOException {
+    out.defaultWriteObject()
+    new ObjectWritable(t).write(out)
+    //t.foreach(x => new ObjectWritable(x).write(out))
+  }
+
+  private def readObject(in: ObjectInputStream): Unit = Utils.tryOrIOException {
+    in.defaultReadObject()
+    val ow = new ObjectWritable()
+    ow.setConf(new Configuration())
+    ow.readFields(in)
+    t = ow.get().asInstanceOf[Array[T]]
+  }
+}

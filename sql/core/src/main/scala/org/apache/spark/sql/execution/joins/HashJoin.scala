@@ -45,7 +45,7 @@ trait HashJoin {
   override def output = left.output ++ right.output
 
   //zengdan
-  @transient lazy val (fixedSize, stringIndexes) = outputSize(output)
+  @transient lazy val (fixedSize, varIndexes) = outputSize(output)
 
   @transient protected lazy val buildSideKeyGenerator: Projection =
     newProjection(buildKeys, buildPlan.output)
@@ -100,9 +100,9 @@ trait HashJoin {
         currentMatchPosition += 1
         parentReadTime += (System.nanoTime() - start)
         rowCount += 1
-        for (index <- stringIndexes) {
+        for (index <- varIndexes) {
           //sizeInBytes += result.getString(index).length
-          avgSize += ret.getString(index).length
+          avgSize += output(index).dataType.size(ret, index)
         }
         ret
       }
@@ -157,6 +157,7 @@ trait HashJoin {
 
   protected def hashJoin(streamIter: Iterator[Row], hashedRelation: HashedRelation): Iterator[Row] =
   {
+    val id = if(nodeRef.isDefined){nodeRef.get.id} else{-1}
     new Iterator[Row] {
       private[this] var currentStreamedRow: Row = _
       private[this] var currentHashMatches: CompactBuffer[Row] = _

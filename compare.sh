@@ -1,6 +1,6 @@
-file1="QueryT$1-false.txt"
+file1="QueryT$1-false-0.txt"
 file2="QueryT$1-true.txt"
-for((i=0;i<=5;i++))
+for((i=0;i<4;i++))
 do
 file2="QueryT$1-true-$i.txt"
 count1=`cat $file1 | wc -l`

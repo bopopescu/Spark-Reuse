@@ -33,6 +33,30 @@ abstract class Expression extends TreeNode[Expression] {
     this.simpleString.compareTo(other.simpleString) < 0
   }
 
+  //zengdan
+  def compareTree(other: Expression): Int = {
+    var cur = this.simpleString.compareTo(other.simpleString)
+    if(cur == 0){
+      var i = 0
+      var flag = true
+      while(i < children.length && flag){
+        val childrenMatch = this.children(i).simpleString.compareTo(other.children(i).simpleString)
+        if(childrenMatch != 0) {
+          cur = childrenMatch
+          flag = false
+        }
+        i += 1
+      }
+    }
+    cur
+  }
+
+  //zengdan
+  def transformExpression(): Expression = {
+    this
+  }
+
+
   /**
    * Returns true when an expression is a candidate for static evaluation before the query is
    * executed.

@@ -17,6 +17,7 @@
 
 package org.apache.spark.sql.hive.execution
 
+import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.sql.catalyst.plans.logical.QNodeRef
@@ -84,7 +85,7 @@ case class HiveTableScan(
   addColumnMetadataToConf(hiveExtraConf)
 
   @transient
-  private[this] val hadoopReader = 
+  private[this] val hadoopReader =
     new HadoopTableReader(attributes, relation, context, hiveExtraConf)
 
   private[this] def castFromString(value: String, dataType: DataType) = {
@@ -141,23 +142,21 @@ case class HiveTableScan(
     }
   }
 
-  override def execute() = if (!relation.hiveQlTable.isPartitioned) {
-
-    val old = hadoopReader.makeRDDForTable(relation.hiveQlTable)
-    if(!nodeRef.isDefined){
-      old
-    }else{
-      var newRdd = if(!nodeRef.get.collect){
-        old
-      } else{
-        old.mapPartitions{ iter =>
-          new Iterator[Row]{
+  override def execute():RDD[Row] = if (!relation.hiveQlTable.isPartitioned) {
+    val loaded = sqlContext.loadData(output, nodeRef)
+    if(loaded.isDefined){
+      loaded.get
+    }else {
+      val shouldCollect = nodeRef.isDefined && nodeRef.get.collect
+      val newRdd = if (shouldCollect) {
+        hadoopReader.makeRDDForTable(relation.hiveQlTable).mapPartitions { iter =>
+          new Iterator[Row] {
             override def hasNext = {
               val start = System.nanoTime()
               val continue = iter.hasNext
               time += (System.nanoTime() - start)
-              if(!continue){
-                avgSize = (fixedSize + avgSize/rowCount)
+              if (!continue) {
+                avgSize = (fixedSize + avgSize / rowCount)
                 logDebug(s"HiveTableScan: $time, $rowCount, $avgSize")
                 var statistics = Stats.statistics.get()
                 if (statistics == null) {
@@ -165,32 +164,28 @@ case class HiveTableScan(
                   statistics = Map[Int, Array[Int]]()
                   Stats.statistics.set(statistics)
                 }
-                statistics.put(nodeRef.get.id, Array((time/1e6).toInt, avgSize*rowCount))
+                statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, avgSize * rowCount))
               }
               continue
             }
-            override def next() ={
+
+            override def next() = {
               val start = System.nanoTime()
               val rst = iter.next()
               time += (System.nanoTime() - start)
               rowCount += 1
-              for (index <- stringIndexes) {
+              for (index <- varIndexes) {
                 //sizeInBytes += result.getString(index).length
-                avgSize += rst.getString(index).length
+                avgSize += output(index).dataType.size(rst, index)
               }
               rst
             }
           }
         }
+      } else {
+        hadoopReader.makeRDDForTable(relation.hiveQlTable)
       }
-
-      if (nodeRef.get.cache) {
-        newRdd.cacheID = Some(nodeRef.get.id)
-        //newRdd = newRdd.sparkContext.saveAndLoadOperatorFile[Row](newRdd.cacheID.get,
-        //  newRdd.map(ScalaReflection.convertRowToScala(_, schema)))
-        newRdd = SQLContext.cacheData(newRdd, output, nodeRef.get.id)
-      }
-      newRdd
+      cacheData(newRdd, output, nodeRef)
     }
   } else {
     //zengdan To do
@@ -199,5 +194,5 @@ case class HiveTableScan(
 
   override def output = attributes
 
-  @transient lazy val (fixedSize, stringIndexes) = outputSize(output)
+  @transient lazy val (fixedSize, varIndexes) = outputSize(output)
 }

@@ -158,7 +158,7 @@ case class Count(child: Expression) extends PartialAggregate with trees.UnaryNod
   override def toString = s"COUNT($child)"
 
   override def asPartial: SplitEvaluation = {
-    val partialCount = Alias(Count(child), "PartialCount")()
+    val partialCount = Alias(Count(child), "PartialCount " + child.treeStringByName)()
     SplitEvaluation(Coalesce(Seq(Sum(partialCount.toAttribute), Literal(0L))), partialCount :: Nil)
   }
 
@@ -303,8 +303,10 @@ case class Average(child: Expression) extends PartialAggregate with trees.UnaryN
     child.dataType match {
       case DecimalType.Fixed(_, _) =>
         // Turn the child to unlimited decimals for calculation, before going back to fixed
-        val partialSum = Alias(Sum(Cast(child, DecimalType.Unlimited)), "PartialSum")()
-        val partialCount = Alias(Count(child), "PartialCount")()
+        //zengdan
+        val sumChild = Cast(child, DecimalType.Unlimited)
+        val partialSum = Alias(Sum(sumChild), "PartialSum " + sumChild.treeStringByName)()
+        val partialCount = Alias(Count(child), "PartialCount " + child.treeStringByName)()
 
         val castedSum = Cast(Sum(partialSum.toAttribute), DecimalType.Unlimited)
         val castedCount = Cast(Sum(partialCount.toAttribute), DecimalType.Unlimited)
@@ -313,8 +315,8 @@ case class Average(child: Expression) extends PartialAggregate with trees.UnaryN
           partialCount :: partialSum :: Nil)
 
       case _ =>
-        val partialSum = Alias(Sum(child), "PartialSum")()
-        val partialCount = Alias(Count(child), "PartialCount")()
+        val partialSum = Alias(Sum(child), "PartialSum " + child.treeStringByName)()
+        val partialCount = Alias(Count(child), "PartialCount " + child.treeStringByName)()
 
         val castedSum = Cast(Sum(partialSum.toAttribute), dataType)
         val castedCount = Cast(Sum(partialCount.toAttribute), dataType)
@@ -345,13 +347,15 @@ case class Sum(child: Expression) extends PartialAggregate with trees.UnaryNode[
   override def asPartial: SplitEvaluation = {
     child.dataType match {
       case DecimalType.Fixed(_, _) =>
-        val partialSum = Alias(Sum(Cast(child, DecimalType.Unlimited)), "PartialSum")()
+        //zengdan
+        val sumChild = Cast(child, DecimalType.Unlimited)
+        val partialSum = Alias(Sum(sumChild), "PartialSum " + sumChild.treeStringByName)()
         SplitEvaluation(
           Cast(Sum(partialSum.toAttribute), dataType),
           partialSum :: Nil)
 
       case _ =>
-        val partialSum = Alias(Sum(child), "PartialSum")()
+        val partialSum = Alias(Sum(child), "PartialSum " + child.treeStringByName)() //zengdan
         SplitEvaluation(
           Sum(partialSum.toAttribute),
           partialSum :: Nil)

@@ -20,10 +20,11 @@ package org.apache.spark.sql.execution
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.shuffle.sort.SortShuffleManager
 import org.apache.spark.sql.auto.cache.QueryGraph
-import org.apache.spark.sql.catalyst.types.NativeType
+import org.apache.spark.sql.catalyst.ScalaReflection
+import org.apache.spark.sql.catalyst.types.{ArrayType, NativeType}
 import org.apache.spark.{SparkEnv, HashPartitioner, RangePartitioner, SparkConf}
-import org.apache.spark.rdd.ShuffledRDD
-import org.apache.spark.sql.{SQLContext, Row}
+import org.apache.spark.rdd.{RDD, ShuffledRDD}
+import org.apache.spark.sql._
 import org.apache.spark.sql.catalyst.errors.attachTree
 import org.apache.spark.sql.catalyst.expressions.RowOrdering
 import org.apache.spark.sql.catalyst.plans.physical._
@@ -43,15 +44,17 @@ case class Exchange(newPartitioning: Partitioning, child: SparkPlan) extends Una
 
   override def output = child.output
 
+  @transient lazy val (fixedSize, varIndexes) = outputSize(output)
+
   //this.id = child.id
 
   /** We must copy rows when sort based shuffle is on */
   protected def sortBasedShuffleOn = SparkEnv.get.shuffleManager.isInstanceOf[SortShuffleManager]
 
-  private val bypassMergeThreshold =
-    child.sqlContext.sparkContext.conf.getInt("spark.shuffle.sort.bypassMergeThreshold", 200)
+  private val bypassMergeThreshold = SparkEnv.get.conf.getInt("spark.shuffle.sort.bypassMergeThreshold", 200)
+    //child.sqlContext.sparkContext.conf.getInt("spark.shuffle.sort.bypassMergeThreshold", 200)
 
-  override def execute() = attachTree(this , "execute") {
+  override def execute():RDD[Row] = attachTree(this , "execute") {
     newPartitioning match {
       case HashPartitioning(expressions, numPartitions) =>
         // TODO: Eliminate redundant expressions in grouping key and value.
@@ -62,25 +65,30 @@ case class Exchange(newPartitioning: Partitioning, child: SparkPlan) extends Una
         // we can avoid the defensive copies to improve performance. In the long run, we probably
         // want to include information in shuffle dependencies to indicate whether elements in the
         // source RDD should be copied.
-        val shuffleCollect = nodeRef.isDefined && nodeRef.get.collect
-        val rdd = if (sortBasedShuffleOn && numPartitions > bypassMergeThreshold) {
-          if (shuffleCollect) {
-            child.execute().mapPartitions { iter =>
-              val hashExpressions = newMutableProjection(expressions, child.output)()
-
-              new Iterator[(Row, Row)] {
-                override def hasNext = {
-                  val start = System.nanoTime()
-                  val continue = iter.hasNext
-                  time += (System.nanoTime() - start)
-                  if (!continue) {
-                    var statistics = Stats.statistics.get()
-                    if (statistics == null) {
-                      //no match in the query graph, so no need to collect information
-                      statistics = Map[Int, Array[Int]]()
-                      Stats.statistics.set(statistics)
-                    }
-                    logDebug(s"Exchange: $time, $rowCount, $avgSize")
+        val loaded = sqlContext.loadData(output, nodeRef)
+        if(loaded.isDefined){
+          loaded.get
+        }else {
+          val shuffleCollect = nodeRef.isDefined && nodeRef.get.collect
+          val rdd = if (sortBasedShuffleOn && numPartitions > bypassMergeThreshold) {
+            if (shuffleCollect) {
+              child.execute().mapPartitions { iter =>
+                val hashExpressions = newMutableProjection(expressions, child.output)()
+                new Iterator[(Row, Row)] {
+                  override def hasNext = {
+                    val start = System.nanoTime()
+                    val continue = iter.hasNext
+                    time += (System.nanoTime() - start)
+                    if (!continue) {
+                      var statistics = Stats.statistics.get()
+                      if (statistics == null) {
+                        //no match in the query graph, so no need to collect information
+                        statistics = Map[Int, Array[Int]]()
+                        Stats.statistics.set(statistics)
+                      }
+                      logDebug(s"Exchange before Shuffle: $time, $rowCount, $avgSize")
+                      statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, 0))
+                      /*
                     val partialStats = statistics.get(nodeRef.get.id)
                     if(!partialStats.isDefined)
                       statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, 0))
@@ -88,80 +96,121 @@ case class Exchange(newPartitioning: Partitioning, child: SparkPlan) extends Una
                       val partialTime = partialStats.get(0)
                       statistics.put(nodeRef.get.id, Array((time / 1e6 - partialTime).toInt, 0))
                     }
+                    */
+                    }
+                    continue
+                  }
+
+                  override def next = {
+                    val start = System.nanoTime()
+                    val r = iter.next()
+                    time += (System.nanoTime() - start) //summary the time of reading child data
+                    (hashExpressions(r).copy(), r.copy())
+                  }
+                }
+              }
+            } else {
+              child.execute().mapPartitions { iter =>
+                val hashExpressions = newMutableProjection(expressions, child.output)()
+                iter.map(r => (hashExpressions(r).copy(), r.copy()))
+              }
+            }
+          } else {
+            if (shuffleCollect) {
+              child.execute().mapPartitions { iter =>
+                val hashExpressions = newMutableProjection(expressions, child.output)()
+                val mutablePair = new MutablePair[Row, Row]()
+
+                new Iterator[MutablePair[Row, Row]] {
+                  override def hasNext = {
+                    val start = System.nanoTime()
+                    val continue = iter.hasNext
+                    time += (System.nanoTime() - start)
+                    if (!continue) {
+                      var statistics = Stats.statistics.get()
+                      if (statistics == null) {
+                        //no match in the query graph, so no need to collect information
+                        statistics = Map[Int, Array[Int]]()
+                        Stats.statistics.set(statistics)
+                      }
+                      logDebug(s"Exchange before Shuffle: $time, $rowCount, $avgSize")
+                      statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, 0))
+                      /*
+                    val partialStats = statistics.get(nodeRef.get.id)
+                    if(!partialStats.isDefined)
+                      statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, 0))
+                    else{
+                      val partialTime = partialStats.get(0)
+                      statistics.put(nodeRef.get.id, Array((time / 1e6 - partialTime).toInt, 0))
+                    }
+                    */
+                    }
+                    continue
+                  }
+
+                  override def next = {
+                    val start = System.nanoTime()
+                    val r = iter.next()
+                    time += (System.nanoTime() - start)
+                    mutablePair.update(hashExpressions(r), r)
+                  }
+                }
+              }
+            } else {
+              child.execute().mapPartitions { iter =>
+                val hashExpressions = newMutableProjection(expressions, child.output)()
+                val mutablePair = new MutablePair[Row, Row]()
+                iter.map(r => mutablePair.update(hashExpressions(r), r))
+              }
+            }
+          }
+
+          if (shuffleCollect) {
+            rdd.cacheID = Some(nodeRef.get.id)
+          }
+
+          val part = new HashPartitioner(numPartitions)
+          val shuffled = new ShuffledRDD[Row, Row, Row](rdd, part)
+          shuffled.setSerializer(new SparkSqlSerializer(new SparkConf(false)))
+          val newRdd = if (shuffleCollect) {
+            shuffled.mapPartitions { iter =>
+              new Iterator[Row] {
+                override def hasNext = {
+                  val start = System.nanoTime()
+                  val continue = iter.hasNext
+                  time += (System.nanoTime() - start)
+                  if (!continue && rowCount != 0) {
+                    avgSize = (fixedSize + avgSize / rowCount)
+                    logDebug(s"Exchange after Shuffle ${nodeRef.get.id}: $time, $rowCount, $avgSize")
+                    var statistics = Stats.statistics.get()
+                    if (statistics == null) {
+                      //no match in the query graph, so no need to collect information
+                      statistics = Map[Int, Array[Int]]()
+                      Stats.statistics.set(statistics)
+                    }
+                    statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, avgSize * rowCount))
                   }
                   continue
                 }
 
-                override def next = {
+                override def next() = {
                   val start = System.nanoTime()
-                  val r = iter.next()
-                  time += (System.nanoTime() - start) //summary the time of reading child data
-                  (hashExpressions(r).copy(), r.copy())
+                  val ret = iter.next()._2
+                  time += (System.nanoTime() - start)
+                  rowCount += 1
+                  for (index <- varIndexes) {
+                    //sizeInBytes += result.getString(index).length
+                    avgSize += output(index).dataType.size(ret, index)
+                  }
+                  ret
                 }
               }
             }
           } else {
-            child.execute().mapPartitions { iter =>
-              val hashExpressions = newMutableProjection(expressions, child.output)()
-              iter.map(r => (hashExpressions(r).copy(), r.copy()))
-            }
+            shuffled.map(_._2)
           }
-        } else {
-          if(shuffleCollect){
-            child.execute().mapPartitions { iter =>
-              val hashExpressions = newMutableProjection(expressions, child.output)()
-              val mutablePair = new MutablePair[Row, Row]()
-
-              new Iterator[MutablePair[Row, Row]] {
-                override def hasNext = {
-                  val start = System.nanoTime()
-                  val continue = iter.hasNext
-                  time += (System.nanoTime() - start)
-                  if (!continue) {
-                    var statistics = Stats.statistics.get()
-                    if (statistics == null) {
-                      //no match in the query graph, so no need to collect information
-                      statistics = Map[Int, Array[Int]]()
-                      Stats.statistics.set(statistics)
-                    }
-                    logDebug(s"Exchange: $time, $rowCount, $avgSize")
-                    val partialStats = statistics.get(nodeRef.get.id)
-                    if(!partialStats.isDefined)
-                      statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, 0))
-                    else{
-                      val partialTime = partialStats.get(0)
-                      statistics.put(nodeRef.get.id, Array((time / 1e6 - partialTime).toInt, 0))
-                    }
-                  }
-                  continue
-                }
-
-                override def next = {
-                  val start = System.nanoTime()
-                  val r = iter.next()
-                  time += (System.nanoTime() - start)
-                  mutablePair.update(hashExpressions(r), r)
-                }
-              }
-            }
-          }else {
-            child.execute().mapPartitions { iter =>
-              val hashExpressions = newMutableProjection(expressions, child.output)()
-              val mutablePair = new MutablePair[Row, Row]()
-              iter.map(r => mutablePair.update(hashExpressions(r), r))
-            }
-          }
+          cacheData(newRdd, output, nodeRef)
         }
-
-        if(shuffleCollect) {
-          rdd.cacheID = Some(nodeRef.get.id)
-        }
-
-
-        val part = new HashPartitioner(numPartitions)
-        val shuffled = new ShuffledRDD[Row, Row, Row](rdd, part)
-        shuffled.setSerializer(new SparkSqlSerializer(new SparkConf(false)))
-        shuffled.map(_._2)
 
       case RangePartitioning(sortingExpressions, numPartitions) =>
         val rdd = if (sortBasedShuffleOn) {
@@ -187,23 +236,29 @@ case class Exchange(newPartitioning: Partitioning, child: SparkPlan) extends Una
         // operators like `TakeOrdered` may require an ordering within the partition, and currently
         // `SinglePartition` doesn't include ordering information.
         // TODO Add `SingleOrderedPartition` for operators like `TakeOrdered`
-        val shuffleCollect = nodeRef.isDefined && nodeRef.get.collect
-        val rdd = if (sortBasedShuffleOn) {
-          if(shuffleCollect){
-            child.execute().mapPartitions{iter =>
-              new Iterator[(Null, Row)]{
-                override def hasNext = {
-                  val start = System.nanoTime()
-                  val continue = iter.hasNext
-                  time += (System.nanoTime() - start)
-                  if (!continue) {
-                    var statistics = Stats.statistics.get()
-                    if (statistics == null) {
-                      //no match in the query graph, so no need to collect information
-                      statistics = Map[Int, Array[Int]]()
-                      Stats.statistics.set(statistics)
-                    }
-                    logDebug(s"Exchange: $time, $rowCount, $avgSize")
+        val loaded = sqlContext.loadData(output, nodeRef)
+        if(loaded.isDefined){
+          loaded.get
+        }else {
+          val shuffleCollect = nodeRef.isDefined && nodeRef.get.collect
+          val rdd = if (sortBasedShuffleOn) {
+            if (shuffleCollect) {
+              child.execute().mapPartitions { iter =>
+                new Iterator[(Null, Row)] {
+                  override def hasNext = {
+                    val start = System.nanoTime()
+                    val continue = iter.hasNext
+                    time += (System.nanoTime() - start)
+                    if (!continue) {
+                      var statistics = Stats.statistics.get()
+                      if (statistics == null) {
+                        //no match in the query graph, so no need to collect information
+                        statistics = Map[Int, Array[Int]]()
+                        Stats.statistics.set(statistics)
+                      }
+                      logDebug(s"Exchange: $time, $rowCount, $avgSize")
+                      statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, 0))
+                      /*
                     val partialStats = statistics.get(nodeRef.get.id)
                     if (!partialStats.isDefined)
                       statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, 0))
@@ -211,37 +266,41 @@ case class Exchange(newPartitioning: Partitioning, child: SparkPlan) extends Una
                       val partialTime = partialStats.get(0)
                       statistics.put(nodeRef.get.id, Array((time / 1e6 - partialTime).toInt, 0))
                     }
+                    */
+                    }
+                    continue
                   }
-                  continue
-                }
-                override def next() = {
-                  val start = System.nanoTime()
-                  val r = iter.next()
-                  time += (System.nanoTime() - start)
-                  (null, r.copy())
+
+                  override def next() = {
+                    val start = System.nanoTime()
+                    val r = iter.next()
+                    time += (System.nanoTime() - start)
+                    (null, r.copy())
+                  }
                 }
               }
+            } else {
+              child.execute().mapPartitions { iter => iter.map(r => (null, r.copy()))}
             }
-          }else {
-            child.execute().mapPartitions { iter => iter.map(r => (null, r.copy()))}
-          }
-        } else {
-          if(shuffleCollect){
-            child.execute().mapPartitions{iter =>
-              val mutablePair = new MutablePair[Null, Row]()
-              new Iterator[MutablePair[Null, Row]]{
-                override def hasNext = {
-                  val start = System.nanoTime()
-                  val continue = iter.hasNext
-                  time += (System.nanoTime() - start)
-                  if (!continue) {
-                    var statistics = Stats.statistics.get()
-                    if (statistics == null) {
-                      //no match in the query graph, so no need to collect information
-                      statistics = Map[Int, Array[Int]]()
-                      Stats.statistics.set(statistics)
-                    }
-                    logDebug(s"Exchange: $time, $rowCount, $avgSize")
+          } else {
+            if (shuffleCollect) {
+              child.execute().mapPartitions { iter =>
+                val mutablePair = new MutablePair[Null, Row]()
+                new Iterator[MutablePair[Null, Row]] {
+                  override def hasNext = {
+                    val start = System.nanoTime()
+                    val continue = iter.hasNext
+                    time += (System.nanoTime() - start)
+                    if (!continue) {
+                      var statistics = Stats.statistics.get()
+                      if (statistics == null) {
+                        //no match in the query graph, so no need to collect information
+                        statistics = Map[Int, Array[Int]]()
+                        Stats.statistics.set(statistics)
+                      }
+                      logDebug(s"Exchange: $time, $rowCount, $avgSize")
+                      statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, 0))
+                      /*
                     val partialStats = statistics.get(nodeRef.get.id)
                     if (!partialStats.isDefined)
                       statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, 0))
@@ -249,33 +308,74 @@ case class Exchange(newPartitioning: Partitioning, child: SparkPlan) extends Una
                       val partialTime = partialStats.get(0)
                       statistics.put(nodeRef.get.id, Array((time / 1e6 - partialTime).toInt, 0))
                     }
+                    */
+                    }
+                    continue
+                  }
+
+                  override def next() = {
+                    val start = System.nanoTime()
+                    val r = iter.next()
+                    time += (System.nanoTime() - start)
+                    mutablePair.update(null, r)
+                  }
+                }
+              }
+            } else {
+              child.execute().mapPartitions { iter =>
+                val mutablePair = new MutablePair[Null, Row]()
+                iter.map(r => mutablePair.update(null, r))
+              }
+            }
+          }
+
+          if (shuffleCollect) {
+            rdd.cacheID = Some(nodeRef.get.id)
+          }
+
+          val partitioner = new HashPartitioner(1)
+          val shuffled = new ShuffledRDD[Null, Row, Row](rdd, partitioner)
+          shuffled.setSerializer(new SparkSqlSerializer(new SparkConf(false)))
+          val newRdd = if (shuffleCollect) {
+            shuffled.mapPartitions { iter =>
+              new Iterator[Row] {
+                override def hasNext = {
+                  val start = System.nanoTime()
+                  val continue = iter.hasNext
+                  time += (System.nanoTime() - start)
+                  if (!continue && rowCount != 0) {
+                    avgSize = (fixedSize + avgSize / rowCount)
+                    logDebug(s"Exchange after Shuffle ${nodeRef.get.id}: $time, $rowCount, $avgSize")
+                    var statistics = Stats.statistics.get()
+                    if (statistics == null) {
+                      //no match in the query graph, so no need to collect information
+                      statistics = Map[Int, Array[Int]]()
+                      Stats.statistics.set(statistics)
+                    }
+                    statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, avgSize * rowCount))
                   }
                   continue
                 }
+
                 override def next() = {
                   val start = System.nanoTime()
-                  val r = iter.next()
+                  val ret = iter.next()._2
                   time += (System.nanoTime() - start)
-                  mutablePair.update(null, r)
+                  rowCount += 1
+                  for (index <- varIndexes) {
+                    //sizeInBytes += result.getString(index).length
+                    avgSize += output(index).dataType.size(ret, index)
+                  }
+                  ret
                 }
               }
             }
-          }else {
-            child.execute().mapPartitions { iter =>
-              val mutablePair = new MutablePair[Null, Row]()
-              iter.map(r => mutablePair.update(null, r))
-            }
+          } else {
+            shuffled.map(_._2)
           }
-        }
 
-        if(shuffleCollect) {
-          rdd.cacheID = Some(nodeRef.get.id)
+          cacheData(newRdd, output, nodeRef)
         }
-
-        val partitioner = new HashPartitioner(1)
-        val shuffled = new ShuffledRDD[Null, Row, Row](rdd, partitioner)
-        shuffled.setSerializer(new SparkSqlSerializer(new SparkConf(false)))
-        shuffled.map(_._2)
 
       case _ => sys.error(s"Exchange not implemented for $newPartitioning")
       // TODO: Handle BroadcastPartitioning.

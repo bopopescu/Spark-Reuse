@@ -105,6 +105,7 @@ case class Alias(child: Expression, name: String)
 
   override def toAttribute = {
     if (resolved) {
+      //zengdan
       AttributeReference(name, child.dataType, child.nullable, metadata)(exprId, qualifiers)
     } else {
       UnresolvedAttribute(name)

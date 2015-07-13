@@ -128,9 +128,14 @@ private[spark] class TachyonStore(
 
   //zengdan
   def checkGlobalExists(blockId: BlockId): Boolean =
-    tachyonManager.checkGloablExists(blockId)
+    tachyonManager.checkGlobalExists(blockId)
 
   //zengdan
   def checkGlobalExists(operatorId: Int): Boolean =
-    tachyonManager.checkGloablExists(operatorId)
+    tachyonManager.checkGlobalExists(operatorId)
+
+  //zengdan
+  def removeGlobalFiles(operatorId: Int) = {
+    tachyonManager.removeGlobalFiles(operatorId)
+  }
 }

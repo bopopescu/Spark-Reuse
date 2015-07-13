@@ -54,6 +54,8 @@ private[spark] abstract class ZippedPartitionsBaseRDD[V: ClassTag](
   override def getPartitions: Array[Partition] = {
     val numParts = rdds.head.partitions.size
     if (!rdds.forall(rdd => rdd.partitions.size == numParts)) {
+      //zengdan test
+      rdds.foreach(x => logError(x.toString + " size: " + x.partitions.size))
       throw new IllegalArgumentException("Can't zip RDDs with unequal numbers of partitions")
     }
     Array.tabulate[Partition](numParts) { i =>

@@ -17,7 +17,9 @@
 
 package org.apache.spark.sql.execution
 
-import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql._
+import org.apache.spark.sql.catalyst.expressions.Row
+import org.apache.spark.sql.catalyst.types.StructType
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -42,22 +44,26 @@ import scala.collection.mutable.Map
  * :: DeveloperApi ::
  */
 @DeveloperApi
-case class Project(projectList: Seq[NamedExpression], child: SparkPlan, optionRef: Option[QNodeRef] = None) extends UnaryNode {
-  //val newProjectList = projectList.sortWith((x,y) => x.name.compareTo(y.name) < 0)
+case class Project(projectList: Seq[NamedExpression], child: SparkPlan) extends UnaryNode {
   override def output = projectList.map(_.toAttribute)
 
 
   @transient lazy val buildProjection = newMutableProjection(projectList, child.output)
-  @transient lazy val (fixedSize, stringIndexes) = outputSize(output)
+  @transient lazy val (fixedSize, varIndexes) = outputSize(output)
 
   //this.id = optionId
-  this.nodeRef = optionRef
+  //this.nodeRef = optionRef
 
   var totalCollect = false
 
-  def execute() = {
-    val shouldCollect = nodeRef.isDefined && nodeRef.get.collect
-    var newRdd = if(shouldCollect){
+  def execute(): RDD[Row] = {
+    val loaded = sqlContext.loadData(output, nodeRef)
+    if(loaded.isDefined){
+      loaded.get
+    }else {
+
+      val shouldCollect = nodeRef.isDefined && nodeRef.get.collect
+      val newRdd = if (shouldCollect) {
         child.execute().mapPartitions { iter =>
           val start = System.nanoTime()
           val resuableProjection = buildProjection()
@@ -65,16 +71,16 @@ case class Project(projectList: Seq[NamedExpression], child: SparkPlan, optionRe
 
           new Iterator[Row] {
             override final def hasNext = {
-              val continue = if(totalCollect) {
+              val continue = if (totalCollect) {
                 val start = System.nanoTime()
                 val x = iter.hasNext
                 time += (System.nanoTime() - start)
                 x
-              }else{
+              } else {
                 iter.hasNext
               }
               if (!continue && rowCount != 0) {
-                avgSize = (fixedSize + avgSize/rowCount)
+                avgSize = (fixedSize + avgSize / rowCount)
                 logDebug(s"Project ${nodeRef.get.id}: $time, $rowCount, $avgSize")
                 var statistics = Stats.statistics.get()
                 if (statistics == null) {
@@ -82,20 +88,20 @@ case class Project(projectList: Seq[NamedExpression], child: SparkPlan, optionRe
                   statistics = Map[Int, Array[Int]]()
                   Stats.statistics.set(statistics)
                 }
-                statistics.put(nodeRef.get.id, Array((time/1e6).toInt, avgSize*rowCount))
+                statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, avgSize * rowCount))
               }
               continue
             }
 
             override final def next() = {
-              val result = if(totalCollect){
+              val result = if (totalCollect) {
                 val cstart = System.nanoTime()
                 val pre = iter.next()
                 val x = resuableProjection(pre)
                 //time to compute a row from source, not only the operator's processing time
                 time += (System.nanoTime() - cstart)
                 x
-              }else{
+              } else {
                 val pre = iter.next()
                 val cstart = System.nanoTime()
                 val x = resuableProjection(pre)
@@ -105,37 +111,23 @@ case class Project(projectList: Seq[NamedExpression], child: SparkPlan, optionRe
               }
 
               rowCount += 1
-              for (index <- stringIndexes) {
+              for (index <- varIndexes) {
                 //sizeInBytes += result.getString(index).length
-                avgSize += result.getString(index).length
+                avgSize += output(index).dataType.size(result, index)
               }
               result
             }
           }
         }
-    }else{
+      } else {
         child.execute().mapPartitions { iter =>
           val resuableProjection = buildProjection()
           iter.map(resuableProjection)
         }
+      }
+
+      cacheData(newRdd, output, nodeRef)
     }
-
-
-
-    if (nodeRef.isDefined && nodeRef.get.cache) {
-
-        newRdd.cacheID = Some(nodeRef.get.id)
-        //newRdd = newRdd.sparkContext.saveAndLoadOperatorFile[Row](newRdd.cacheID.get,
-        //  newRdd.map(ScalaReflection.convertRowToScala(_, schema)))
-        newRdd = SQLContext.cacheData(newRdd, output, nodeRef.get.id)
-        //if(!SparkEnv.get.blockManager.tachyonStore.checkGlobalExists(id.get))
-        //  rdd.saveAsObjectFile(s"tachyon://localhost:19998/tmp_spark_tachyon/${rdd.cacheID.get}")
-
-        //rdd = rdd.sparkContext.objectFile(s"tachyon://localhost:19998/tmp_spark_tachyon/${rdd.cacheID.get}")
-        //rdd.persist(StorageLevel.OFF_HEAP)
-        //rdd.clearGlobalDependencies()
-    }
-    newRdd
   }
 }
 
@@ -146,87 +138,90 @@ case class Project(projectList: Seq[NamedExpression], child: SparkPlan, optionRe
 case class Filter(condition: Expression, child: SparkPlan, optionRef: Option[QNodeRef] = None) extends UnaryNode {
   override def output = child.output
 
-  @transient lazy val (fixedSize, stringIndexes) = outputSize(output)
+  @transient lazy val (fixedSize, varIndexes) = outputSize(output)
 
   @transient lazy val conditionEvaluator = newPredicate(condition, child.output)
 
   //this.id = optionId
-  this.nodeRef = optionRef
+  //this.nodeRef = optionRef
   var totalCollect = false  //in case of filter->hivetablescan
 
-  def execute() = {
-    val shouldCollect = nodeRef.isDefined && nodeRef.get.collect
-    var newRdd = if(shouldCollect){
-      child.execute().mapPartitions{ iter =>
-        var hd: Row = null
-        var hdDefined: Boolean = false
-        var flag: Boolean = true
-        new Iterator[Row]{
+  def execute(): RDD[Row] = {
+    val loaded = sqlContext.loadData(output, nodeRef)
+    if(loaded.isDefined){
+      loaded.get
+    }else {
+      val shouldCollect = nodeRef.isDefined && nodeRef.get.collect
+      val newRdd = if (shouldCollect) {
+        child.execute().mapPartitions { iter =>
+          var hd: Row = null
+          var hdDefined: Boolean = false
+          var flag: Boolean = true
+          new Iterator[Row] {
 
-          override def hasNext: Boolean = hdDefined || {
-            do {
-              val continue = if(totalCollect){
-                val start = System.nanoTime()
-                val tmp = iter.hasNext
-                time += (System.nanoTime() - start)
-                tmp
-              }else{
-                iter.hasNext
-              }
-              if (!continue) {
-                if(rowCount != 0) {
-                  avgSize = (fixedSize + avgSize / rowCount)
-                  logDebug(s"Filter ${nodeRef.get.id}: $time, $rowCount, $avgSize")
-                  var statistics = Stats.statistics.get()
-                  if (statistics == null) {
-                    statistics = Map[Int, Array[Int]]()
-                    Stats.statistics.set(statistics)
-                  }
-                  statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, avgSize * rowCount))
+            override def hasNext: Boolean = hdDefined || {
+              do {
+                val continue = if (totalCollect) {
+                  val start = System.nanoTime()
+                  val tmp = iter.hasNext
+                  time += (System.nanoTime() - start)
+                  tmp
+                } else {
+                  iter.hasNext
                 }
-                return false
-              }
-              if(totalCollect){
-                val start = System.nanoTime()
-                hd = iter.next()
-                flag = conditionEvaluator(hd)
-                time += (System.nanoTime() - start)
-              }else {
-                hd = iter.next()
-                val start = System.nanoTime()
-                flag = conditionEvaluator(hd)
-                time += (System.nanoTime() - start)
-              }
-            } while (!flag)
-            hdDefined = true
-            true
-          }
+                if (!continue) {
+                  if (rowCount != 0) {
+                    avgSize = (fixedSize + avgSize / rowCount)
+                    logDebug(s"Filter ${nodeRef.get.id}: $time, $rowCount, $avgSize")
+                    var statistics = Stats.statistics.get()
+                    if (statistics == null) {
+                      statistics = Map[Int, Array[Int]]()
+                      Stats.statistics.set(statistics)
+                    }
+                    statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, avgSize * rowCount))
+                  }
+                  return false
+                }
+                if (totalCollect) {
+                  val start = System.nanoTime()
+                  hd = iter.next()
+                  flag = conditionEvaluator(hd)
+                  time += (System.nanoTime() - start)
+                } else {
+                  hd = iter.next()
+                  val start = System.nanoTime()
+                  flag = conditionEvaluator(hd)
+                  time += (System.nanoTime() - start)
+                }
+              } while (!flag)
+              hdDefined = true
+              true
+            }
 
-          override def next() = {
-            var result: Row = null
-            if (hasNext) {
-              hdDefined = false
-              result = hd
-              rowCount += 1
-              for (index <- stringIndexes) {
-                avgSize += result.getString(index).length
-              }
-            } else
-              throw new NoSuchElementException("next on empty iterator")
-            result
+            override def next() = {
+              var result: Row = null
+              if (hasNext) {
+                hdDefined = false
+                result = hd
+                rowCount += 1
+                for (index <- varIndexes) {
+                  //sizeInBytes += result.getString(index).length
+                  avgSize += output(index).dataType.size(result, index)
+                }
+              } else
+                throw new NoSuchElementException("next on empty iterator")
+              result
+            }
           }
         }
+      } else {
+        child.execute().mapPartitions { iter =>
+          iter.filter(conditionEvaluator)
+        }
       }
-    }else {
-      child.execute().mapPartitions { iter =>
-        iter.filter(conditionEvaluator)
-      }
+
+      cacheData(newRdd, output, nodeRef)
     }
-    if (nodeRef.isDefined && nodeRef.get.cache) {
-      newRdd.cacheID = Some(nodeRef.get.id)
-      newRdd = SQLContext.cacheData(newRdd, output, nodeRef.get.id)
-    }
-    newRdd
   }
 }
 
@@ -421,80 +416,88 @@ case class ExternalSort(
 case class Distinct(partial: Boolean, child: SparkPlan, optionRef: Option[QNodeRef] = None) extends UnaryNode {
   override def output = child.output
 
-  this.nodeRef = optionRef
+  //this.nodeRef = optionRef
 
-  @transient lazy val (fixedSize, stringIndexes) = if(partial) (0,Nil) else outputSize(output)
+  @transient lazy val (fixedSize, varIndexes) = if(partial) (0,Nil) else outputSize(output)
 
   override def requiredChildDistribution =
     if (partial) UnspecifiedDistribution :: Nil else ClusteredDistribution(child.output) :: Nil
 
-  override def execute() = {
-    val shouldCollect = nodeRef.isDefined && nodeRef.get.collect
-    var newRdd = if(shouldCollect) {
-      if (!partial)
-        child.nodeRef = nodeRef
-      child.execute().mapPartitions { iter =>
-        val hashSet = new scala.collection.mutable.HashSet[Row]()
+  override def execute(): RDD[Row] = {
+    val loaded = sqlContext.loadData(output, nodeRef)
+    if(loaded.isDefined){
+      loaded.get
+    }else {
+      val shouldCollect = nodeRef.isDefined && nodeRef.get.collect
+      val newRdd = if (shouldCollect) {
+        //if (!partial)
+        //  child.nodeRef = nodeRef
+        child.execute().mapPartitions { iter =>
+          val hashSet = new scala.collection.mutable.HashSet[Row]()
 
-        var currentRow: Row = null
-        while (iter.hasNext) {
-          currentRow = iter.next()
-          val start = System.nanoTime()
-          if (!hashSet.contains(currentRow)) {
-            hashSet.add(currentRow.copy())
-            rowCount += 1
-            for (index <- stringIndexes) {
-              avgSize += currentRow.getString(index).length
+          var currentRow: Row = null
+          while (iter.hasNext) {
+            currentRow = iter.next()
+            val start = System.nanoTime()
+            if (!hashSet.contains(currentRow)) {
+              hashSet.add(currentRow.copy())
+              time += (System.nanoTime() - start)
+              rowCount += 1
+              for (index <- varIndexes) {
+                //sizeInBytes += result.getString(index).length
+                avgSize += output(index).dataType.size(currentRow, index)
+              }
+            } else {
+              time += (System.nanoTime() - start)
             }
           }
-          time += (System.nanoTime() - start)
-        }
 
 
-        new Iterator[Row]{
-          val newIter = hashSet.iterator
-          override def hasNext = {
-            val continue = newIter.hasNext
-            if (!continue && rowCount != 0) {
-              avgSize = (fixedSize + avgSize / rowCount)
-              logDebug(s"Distinct: $time, $rowCount, $avgSize")
-              var statistics = Stats.statistics.get()
-              if (statistics == null) {
-                statistics = Map[Int, Array[Int]]()
-                Stats.statistics.set(statistics)
-              }
+          new Iterator[Row] {
+            val newIter = hashSet.iterator
+
+            override def hasNext = {
+              val continue = newIter.hasNext
+              if (!continue && rowCount != 0) {
+                avgSize = (fixedSize + avgSize / rowCount)
+                logDebug(s"Distinct: $time, $rowCount, $avgSize")
+                var statistics = Stats.statistics.get()
+                if (statistics == null) {
+                  statistics = Map[Int, Array[Int]]()
+                  Stats.statistics.set(statistics)
+                }
+                statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, avgSize * rowCount))
+                /*
               if(partial) {
                 statistics.put(nodeRef.get.id, Array((time/1e6).toInt, 0))
               }else
                 statistics.put(nodeRef.get.id, Array((time/1e6).toInt, avgSize * rowCount))
+              */
+              }
+              continue
             }
-            continue
-          }
-          override def next = newIter.next()
-        }
-      }
-    }else{
-      child.execute().mapPartitions { iter =>
-        val hashSet = new scala.collection.mutable.HashSet[Row]()
 
-        var currentRow: Row = null
-        while (iter.hasNext) {
-          currentRow = iter.next()
-          if (!hashSet.contains(currentRow)) {
-            hashSet.add(currentRow.copy())
+            override def next = newIter.next()
           }
         }
+      } else {
+        child.execute().mapPartitions { iter =>
+          val hashSet = new scala.collection.mutable.HashSet[Row]()
 
-        hashSet.iterator
+          var currentRow: Row = null
+          while (iter.hasNext) {
+            currentRow = iter.next()
+            if (!hashSet.contains(currentRow)) {
+              hashSet.add(currentRow.copy())
+            }
+          }
+
+          hashSet.iterator
+        }
       }
-    }
 
-    if(nodeRef.isDefined && nodeRef.get.cache && !partial){
-      newRdd.cacheID = Some(nodeRef.get.id)
-      //newRdd = newRdd.sparkContext.saveAndLoadOperatorFile[Row](newRdd.cacheID.get, newRdd.map(ScalaReflection.convertRowToScala(_, schema)))
-      newRdd = SQLContext.cacheData(newRdd, output, nodeRef.get.id)
+      cacheData(newRdd, output, nodeRef)
     }
-    newRdd
   }
 }
 

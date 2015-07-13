@@ -17,6 +17,7 @@
 
 package org.apache.spark.sql.execution.joins
 
+import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.sql.catalyst.plans.logical.QNodeRef
@@ -49,6 +50,17 @@ case class BroadcastHashJoin(
 
   this.nodeRef = optionRef
 
+  override def operatorMatch(plan: SparkPlan):Boolean = {
+    plan match{
+      case hj: HashJoin =>
+        (this.compareExpressions(leftKeys, hj.leftKeys) &&
+          this.compareExpressions(rightKeys, hj.rightKeys)) ||
+          (this.compareExpressions(leftKeys, hj.rightKeys) &&
+            this.compareExpressions(rightKeys, hj.leftKeys))
+      case _ => false
+    }
+  }
+
   override def outputPartitioning: Partitioning = streamedPlan.outputPartitioning
 
   override def requiredChildDistribution =
@@ -72,30 +84,23 @@ case class BroadcastHashJoin(
     result
   }
 
-  override def execute() = {
-    val broadcastRelation = Await.result(broadcastFuture, 5.minute)
-
-    lazy val old = streamedPlan.execute().mapPartitions { streamedIter =>
-      hashJoin(streamedIter, broadcastRelation.value)
-    }
-    if(!nodeRef.isDefined){
-      old
+  override def execute(): RDD[Row] = {
+    val loaded = sqlContext.loadData(output, nodeRef)
+    if(loaded.isDefined){
+      loaded.get
     }else {
-      var newRdd = if (!nodeRef.get.collect) {
-        old
-      } else {
+      val broadcastRelation = Await.result(broadcastFuture, 5.minute)
+      val shouldCollect = nodeRef.isDefined && nodeRef.get.collect
+      val newRdd = if (shouldCollect) {
         streamedPlan.execute().mapPartitions { streamedIter =>
           hashJoinWithCollect(streamedIter, broadcastRelation.value)
         }
+      } else {
+        streamedPlan.execute().mapPartitions { streamedIter =>
+          hashJoin(streamedIter, broadcastRelation.value)
+        }
       }
-
-      if (nodeRef.get.cache) {
-        newRdd.cacheID = Some(nodeRef.get.id)
-        newRdd = SQLContext.cacheData(newRdd, output, nodeRef.get.id)
-        //newRdd = newRdd.sparkContext.saveAndLoadOperatorFile[Row](newRdd.cacheID.get,
-        //  newRdd.map(ScalaReflection.convertRowToScala(_, schema)))
-      }
-      newRdd
+      cacheData(newRdd, output, nodeRef)
     }
   }
 }

@@ -35,6 +35,7 @@ import org.apache.hadoop.io.{ArrayWritable, BooleanWritable, BytesWritable, Doub
 import org.apache.hadoop.mapred.{FileInputFormat, InputFormat, JobConf, SequenceFileInputFormat, TextInputFormat}
 import org.apache.hadoop.mapreduce.{InputFormat => NewInputFormat, Job => NewHadoopJob}
 import org.apache.hadoop.mapreduce.lib.input.{FileInputFormat => NewFileInputFormat}
+import org.apache.hadoop.mapred.FileAlreadyExistsException
 import org.apache.mesos.MesosNativeLibrary
 import akka.actor.Props
 
@@ -809,6 +810,26 @@ class SparkContext(config: SparkConf) extends Logging {
     hadoopFile(path, inputFormatClass, keyClass, valueClass, minPartitions)
   }
 
+  //zengdan
+  //read files by their id
+  def sequenceReuseFile[K, V](path: String,
+                         keyClass: Class[K],
+                         valueClass: Class[V],
+                         minPartitions: Int
+                          ): RDD[(K, V)] = {
+    val inputFormatClass = classOf[SequenceFileInputFormat[K, V]]
+    val confBroadcast = broadcast(new SerializableWritable(hadoopConfiguration))
+    val setInputPathsFunc = (jobConf: JobConf) => FileInputFormat.setInputPaths(jobConf, path)
+    new ReuseRDD(
+      this,
+      confBroadcast,
+      Some(setInputPathsFunc),
+      inputFormatClass,
+      keyClass,
+      valueClass,
+      minPartitions).setName(path)
+  }
+
   /** Get an RDD for a Hadoop SequenceFile with given key and value types.
     *
     * '''Note:''' Because Hadoop's RecordReader class re-uses the same Writable object for each
@@ -872,18 +893,50 @@ class SparkContext(config: SparkConf) extends Logging {
   }
 
   //zengdan
+  def reuseFile[T: ClassTag](
+                               path: String,
+                               minPartitions: Int = defaultMinPartitions
+                               ): RDD[T] = {
+    sequenceReuseFile(path, classOf[NullWritable], classOf[BytesWritable], minPartitions)
+      .flatMap(x => Utils.deserialize[Array[T]](x._2.getBytes, Utils.getContextOrSparkClassLoader))
+  }
+
   //zengdan
-  def saveAndLoadOperatorFile[U:ClassTag](operatorId: Int, rdd: RDD[U], schemaRDD: RDD[U]):(RDD[U], RDD[U], Boolean) = {
+  def loadOperatorFile[U:ClassTag](operatorId: Int):(Option[(RDD[U], RDD[U])], Boolean) = {
     val tachyonUrl = conf.get("spark.tachyonStore.url", "tachyon://localhost:19998")
     val rootPath = conf.get("spark.tachyonStore.global.baseDir", "/global_spark_tachyon")
     val path = tachyonUrl + rootPath + "/" + operatorId
     val schemaPath = path + "_meta"
-    val exists = SparkEnv.get.blockManager.tachyonStore.checkGlobalExists(operatorId)
-    if(!exists) {
-      rdd.saveAsObjectFile(path)
-      schemaRDD.saveAsObjectFile(schemaPath)
+    val tachyonStore = SparkEnv.get.blockManager.tachyonStore
+    val exists = tachyonStore.checkGlobalExists(operatorId)
+    if(exists){
+      (Some(reuseFile(path), objectFile(schemaPath)), exists)
+    }else{
+      (None, exists)
     }
-    (objectFile(path), objectFile(schemaPath), exists)
+  }
+
+  //zengdan cache if not exists
+  def loadOperatorFile[U:ClassTag](operatorId: Int, rdd: RDD[U], schemaRDD: RDD[U]):(RDD[U], RDD[U], Boolean) = {
+    val tachyonUrl = conf.get("spark.tachyonStore.url", "tachyon://localhost:19998")
+    val rootPath = conf.get("spark.tachyonStore.global.baseDir", "/global_spark_tachyon")
+    val path = tachyonUrl + rootPath + "/" + operatorId
+    val schemaPath = path + "_meta"
+    val tachyonStore = SparkEnv.get.blockManager.tachyonStore
+    val exists = tachyonStore.checkGlobalExists(operatorId)
+    if(!exists){
+      try {
+        rdd.saveAsObjectFile(path)
+        schemaRDD.saveAsObjectFile(schemaPath)
+      }catch{
+        case fe: FileAlreadyExistsException =>
+        case e: Exception =>
+          logInfo("Cache Data Exception: " + e.toString)
+          tachyonStore.removeGlobalFiles(operatorId)
+          throw new RuntimeException(e)
+      }
+    }
+    (reuseFile(path), objectFile(schemaPath), exists)
   }
 
   protected[spark] def checkpointFile[T: ClassTag](

@@ -22,6 +22,8 @@ import org.apache.spark.sql.catalyst.analysis.UnresolvedException
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.types.BooleanType
 
+import scala.collection.mutable.ArrayBuffer
+
 object InterpretedPredicate {
   def apply(expression: Expression, inputSchema: Seq[Attribute]): (Row => Boolean) =
     apply(BindReferences.bindReference(expression, inputSchema))
@@ -65,6 +67,49 @@ trait PredicateHelper {
 abstract class BinaryPredicate extends BinaryExpression with Predicate {
   self: Product =>
   def nullable = left.nullable || right.nullable
+
+  //zengdan
+  override def transformExpression(): Expression = {
+    //val childrenExpressions = this.children.map(_.transformExpression())
+    var combineExprs = new ArrayBuffer[Expression]()
+    var i = 0
+    while(i < this.children.length){
+      if(children(i).getClass == this.getClass){
+        //combineExprs.ap
+
+        combineExprs ++= children(i).asInstanceOf[BinaryPredicate].getAllChildrenExpressions()
+      }else{
+        combineExprs += children(i).transformExpression()
+      }
+      i += 1
+    }
+
+    val sortedExprs = combineExprs.sortWith(_.compareTree(_) < 0)
+    i = 1
+    var bExpr: Expression = sortedExprs(0)
+    while(i < sortedExprs.length){
+      bExpr = this.getClass.getConstructor(classOf[Expression], classOf[Expression])
+        .newInstance(bExpr, sortedExprs(i))
+      i += 1
+    }
+
+    bExpr
+  }
+
+  def getAllChildrenExpressions(): Array[Expression] = {
+    var combineExprs = new ArrayBuffer[Expression]()
+    var i = 0
+    while(i < this.children.length){
+      if(children(i).getClass == this.getClass){
+        combineExprs ++= children(i).asInstanceOf[BinaryPredicate].getAllChildrenExpressions()
+      }else{
+        combineExprs += children(i).transformExpression()
+      }
+      i += 1
+    }
+
+    combineExprs.sortWith(_.compareTree(_) < 0).toArray[Expression]
+  }
 }
 
 case class Not(child: Expression) extends UnaryExpression with Predicate {
@@ -202,11 +247,31 @@ case class LessThanOrEqual(left: Expression, right: Expression) extends BinaryCo
 case class GreaterThan(left: Expression, right: Expression) extends BinaryComparison {
   def symbol = ">"
   override def eval(input: Row): Any = c2(input, left, right, _.gt(_, _))
+
+  //zengdan
+  override def transformExpression(): Expression = {
+    val tLeft = left.transformExpression()
+    val tRight = right.transformExpression()
+    if(tLeft.isInstanceOf[AttributeReference] && tRight.isInstanceOf[AttributeReference])
+      new LessThan(tRight, tLeft)
+    else
+      new GreaterThan(tLeft, tRight)
+  }
 }
 
 case class GreaterThanOrEqual(left: Expression, right: Expression) extends BinaryComparison {
   def symbol = ">="
   override def eval(input: Row): Any = c2(input, left, right, _.gteq(_, _))
+
+  //zengdan
+  override def transformExpression(): Expression = {
+    val tLeft = left.transformExpression()
+    val tRight = right.transformExpression()
+    if(tLeft.isInstanceOf[AttributeReference] && tRight.isInstanceOf[AttributeReference])
+      new LessThanOrEqual(tRight, tLeft)
+    else
+      new GreaterThanOrEqual(tLeft, tRight)
+  }
 }
 
 case class If(predicate: Expression, trueValue: Expression, falseValue: Expression)

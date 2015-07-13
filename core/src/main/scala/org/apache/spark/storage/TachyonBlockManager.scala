@@ -147,7 +147,7 @@ private[spark] class TachyonBlockManager(
   }
 
   //zengdan
-  def checkGloablExists(blockId: BlockId): Boolean = {
+  def checkGlobalExists(blockId: BlockId): Boolean = {
     val index = blockId.name.lastIndexOf('_')
     val filename = blockId.name.substring(0, index)
     val hash = Utils.nonNegativeHash(filename)
@@ -176,11 +176,24 @@ private[spark] class TachyonBlockManager(
   }
 
   //zengdan
-  def checkGloablExists(operatorID: Int): Boolean = {
-    val root = SparkEnv.get.conf.get("spark.tachyonStore.global.baseDir", "/tmp_spark_tachyon")
+  def checkGlobalExists(operatorID: Int): Boolean = {
+    val root = SparkEnv.get.conf.get("spark.tachyonStore.global.baseDir", "/global_spark_tachyon")
     val filePath = s"$root/${operatorID}"
     val ext = client.exist(filePath)
     ext
+  }
+
+  //zengdan
+  def removeGlobalFiles(operatorID: Int) = {
+    val root = SparkEnv.get.conf.get("spark.tachyonStore.global.baseDir", "/global_spark_tachyon")
+    val filePath = s"$root/${operatorID}"
+    val metaPath = filePath + "_meta"
+    if(client.exist(filePath)){
+      client.delete(filePath, true)
+    }
+    if(client.exist(metaPath)){
+      client.delete(metaPath, true)
+    }
   }
 
   def getFile(blockId: BlockId): TachyonFile = getFile(blockId.name)
@@ -264,5 +277,20 @@ object TachyonBlockManager extends Logging{
       }
     }
 
+  }
+
+  def checkOperatorFileExists(id: Int): Boolean = {
+    val conf = new SparkConf()
+    val master = conf.get("spark.tachyonStore.url",  "tachyon://localhost:19998")
+    val client = if (master != null && master != "") TachyonFS.get(master) else null
+
+    if (client == null) {
+      logError("Failed to connect to the Tachyon as the master address is not configured")
+      System.exit(ExecutorExitCode.TACHYON_STORE_FAILED_TO_INITIALIZE)
+    }
+
+    val root = conf.get("spark.tachyonStore.global.baseDir", "/global_spark_tachyon")
+    val path = root + "/" + id
+    client.exist(path)
   }
 }

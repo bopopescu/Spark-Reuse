@@ -88,6 +88,14 @@ case class Add(left: Expression, right: Expression) extends BinaryArithmetic {
   def symbol = "+"
 
   override def eval(input: Row): Any = n2(input, left, right, _.plus(_, _))
+
+  //zengdan
+  override def transformExpression(): Expression = {
+    val childrenExpressions = this.children.map(_.transformExpression())
+      .sortWith(_.compareTree(_) < 0)
+    val x = this.withNewChildren(childrenExpressions)
+    x
+  }
 }
 
 case class Subtract(left: Expression, right: Expression) extends BinaryArithmetic {
@@ -100,6 +108,14 @@ case class Multiply(left: Expression, right: Expression) extends BinaryArithmeti
   def symbol = "*"
 
   override def eval(input: Row): Any = n2(input, left, right, _.times(_, _))
+
+  //zengdan
+  override def transformExpression(): Expression = {
+    val childrenExpressions = this.children.map(_.transformExpression())
+      .sortWith(_.compareTree(_) < 0)
+    val x = this.withNewChildren(childrenExpressions)
+    x
+  }
 }
 
 case class Divide(left: Expression, right: Expression) extends BinaryArithmetic {
