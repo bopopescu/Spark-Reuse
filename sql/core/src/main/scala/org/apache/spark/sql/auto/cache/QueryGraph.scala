@@ -72,7 +72,6 @@ class QueryGraph{
     val newNode = new QueryNode(plan)
     curChild.foreach(_.parents.append(newNode))
     nodes.put(newNode.id,newNode)
-
     plan.nodeRef = Some(QNodeRef(newNode.id, false, true, false))
     refs.put(plan.id, plan.nodeRef.get)
     newNode.stats(0) = 1
@@ -164,6 +163,7 @@ class QueryGraph{
   def matchPlan(plan: SparkPlan, refs: HashMap[Int, QNodeRef],
                 varNodes: HashMap[Int, ArrayBuffer[NodeDesc]],
                 maxPlans: ArrayBuffer[SparkPlan]):Unit = {
+
     if((plan.children == null || plan.children.length <= 0) &&
       !plan.isInstanceOf[InMemoryColumnarTableScan]){
       for (leave <- root.parents) {

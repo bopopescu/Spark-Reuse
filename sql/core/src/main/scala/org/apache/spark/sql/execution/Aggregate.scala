@@ -317,7 +317,7 @@ case class Aggregate(
                   val continue = hashTableIter.hasNext
                   if (!continue && rowCount != 0) {
                     avgSize = (fixedSize + avgSize / rowCount)
-                    logDebug(s"Aggregate: $time, $rowCount, $avgSize")
+                    println(s"Aggregate: $time, $rowCount, $avgSize")
                     var statistics = Stats.statistics.get()
                     if (statistics == null) {
                       statistics = Map[Int, Array[Int]]()

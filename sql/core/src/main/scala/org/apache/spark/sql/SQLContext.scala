@@ -486,8 +486,6 @@ class SQLContext(@transient val sparkContext: SparkContext)
       childrenBuffer.append(updatePlan(child, refs, added))
     }
 
-
-
     if(refs.get(plan.id).isDefined){
       val nr = refs.get(plan.id).get
       plan.nodeRef = Some(QNodeRef(nr.id, nr.cache, nr.collect, nr.reuse))
@@ -502,13 +500,17 @@ class SQLContext(@transient val sparkContext: SparkContext)
         val child = plan.getClass.getConstructors.find(_.getParameterTypes.size != 0).head
                   .newInstance((children(0).args ++ childrenBuffer).toArray:_*).asInstanceOf[plan.type]
         child.nodeRef = Some(children(0).nodeRef)
-        return plan.withNewChildren(Seq(child))
+        val newPlan = plan.withNewChildren(Seq(child))
+        newPlan.nodeRef = plan.nodeRef
+        return newPlan
       }else{
         //combine child operator
       }
     }
 
-    return plan.withNewChildren(childrenBuffer)
+    val newPlan = plan.withNewChildren(childrenBuffer)
+    newPlan.nodeRef = plan.nodeRef
+    newPlan
   }
 
   def test(x: Any*): Unit ={
