@@ -1,6 +1,6 @@
-cache=n
+cache=y
 #query=$1
-iter=1
+iter=4
 for((i=1;i<=$1;i++))
 do
 query=$i

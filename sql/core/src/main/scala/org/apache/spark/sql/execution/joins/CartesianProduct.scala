@@ -18,8 +18,12 @@
 package org.apache.spark.sql.execution.joins
 
 import org.apache.spark.annotation.DeveloperApi
+import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.expressions.JoinedRow
 import org.apache.spark.sql.execution.{BinaryNode, SparkPlan}
+import org.apache.spark.util.Stats
+import scala.collection.mutable.Map
+import org.apache.spark.rdd.CartesianWithTimeRDD
 
 /**
  * :: DeveloperApi ::
@@ -27,6 +31,14 @@ import org.apache.spark.sql.execution.{BinaryNode, SparkPlan}
 @DeveloperApi
 case class CartesianProduct(left: SparkPlan, right: SparkPlan) extends BinaryNode {
   override def output = left.output ++ right.output
+  @transient lazy val (fixedSize, varIndexes) = outputSize(output)
+
+  override def operatorMatch(plan: SparkPlan):Boolean = {
+    plan match{
+      case cp: CartesianProduct => true
+      case _ => false
+    }
+  }
 
   override def execute() = {
     val leftResults = left.execute().map(_.copy())
@@ -35,6 +47,60 @@ case class CartesianProduct(left: SparkPlan, right: SparkPlan) extends BinaryNod
     leftResults.cartesian(rightResults).mapPartitions { iter =>
       val joinedRow = new JoinedRow
       iter.map(r => joinedRow(r._1, r._2))
+    }
+
+
+    val loaded = sqlContext.loadData(output, nodeRef)
+    if(loaded.isDefined){
+      loaded.get
+    }else {
+      val shouldCollect = nodeRef.isDefined && nodeRef.get.collect
+      val newRdd = if (!shouldCollect) {
+        leftResults.cartesian(rightResults).mapPartitions { iter =>
+          val joinedRow = new JoinedRow
+          iter.map(r => joinedRow(r._1, r._2))
+        }
+      } else {
+        val cartesianRdd = leftResults.cartesianWithTime(rightResults)
+        cartesianRdd.mapPartitions { iter =>
+          val joinedRow = new JoinedRow
+          var start = 0L
+          new Iterator[Row]{
+            override def hasNext = {
+              start = System.nanoTime()
+              val continue = iter.hasNext
+              time += (System.nanoTime() - start)
+              if (!continue && rowCount != 0) {
+                time -= cartesianRdd.asInstanceOf[CartesianWithTimeRDD[Row, Row]].getTime
+                avgSize = (fixedSize + avgSize / rowCount)
+                logDebug(s"CartesianProduct ${nodeRef.get.id}: $time, $rowCount, $avgSize")
+                var statistics = Stats.statistics.get()
+                if (statistics == null) {
+                  //no match in the query graph, so no need to collect information
+                  statistics = Map[Int, Array[Int]]()
+                  Stats.statistics.set(statistics)
+                }
+                statistics.put(nodeRef.get.id, Array((time / 1e6).toInt, avgSize * rowCount))
+              }
+              continue
+            }
+            override def next = {
+              start = System.nanoTime()
+              val r = iter.next()
+              val res = joinedRow(r._1, r._2)
+              time += (System.nanoTime() - start)
+              rowCount += 1
+              for (index <- varIndexes) {
+                //sizeInBytes += result.getString(index).length
+                avgSize += output(index).dataType.size(res, index)
+              }
+              res
+            }
+          }
+
+        }
+      }
+      cacheData(newRdd, output, nodeRef)
     }
   }
 }

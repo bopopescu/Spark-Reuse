@@ -184,6 +184,15 @@ private[sql] case class InMemoryColumnarTableScan(
     relation: InMemoryRelation)
   extends LeafNode {
 
+  override def operatorMatch(plan: SparkPlan):Boolean = plan match{
+    case inMem: InMemoryColumnarTableScan =>
+      this.compareExpressions(attributes.map(_.transformExpression()),
+        inMem.attributes.map(_.transformExpression())) &&
+      this.compareExpressions(predicates.map(_.transformExpression()),
+        inMem.predicates.map(_.transformExpression()))
+    case _ => false
+  }
+
   @transient override lazy val sqlContext = relation.child.sqlContext
 
   override def output: Seq[Attribute] = attributes

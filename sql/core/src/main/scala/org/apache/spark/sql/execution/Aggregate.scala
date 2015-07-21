@@ -57,8 +57,10 @@ case class Aggregate(
 
   override def operatorMatch(plan: SparkPlan):Boolean = plan match{
       case agg: Aggregate => this.partial == agg.partial &&
-        this.compareExpressions(groupingExpressions, agg.groupingExpressions) &&
-        this.compareExpressions(aggregateExpressions, agg.aggregateExpressions)
+        this.compareExpressions(groupingExpressions.map(_.transformExpression()),
+          agg.groupingExpressions.map(_.transformExpression())) &&
+        this.compareExpressions(aggregateExpressions.map(_.transformExpression()),
+          agg.aggregateExpressions.map(_.transformExpression()))
       case _ => false
   }
 
@@ -317,7 +319,7 @@ case class Aggregate(
                   val continue = hashTableIter.hasNext
                   if (!continue && rowCount != 0) {
                     avgSize = (fixedSize + avgSize / rowCount)
-                    println(s"Aggregate: $time, $rowCount, $avgSize")
+                    logDebug(s"Aggregate: $time, $rowCount, $avgSize")
                     var statistics = Stats.statistics.get()
                     if (statistics == null) {
                       statistics = Map[Int, Array[Int]]()

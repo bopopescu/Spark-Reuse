@@ -42,6 +42,25 @@ case class HashOuterJoin(
     left: SparkPlan,
     right: SparkPlan) extends BinaryNode {
 
+  override def operatorMatch(plan: SparkPlan):Boolean = {
+    plan match{
+      case hj: HashOuterJoin =>
+        joinType.equals(hj.joinType) &&
+          compareOptionExpression(condition, hj.condition) &&
+            compareExpressions(leftKeys.map(_.transformExpression()), hj.leftKeys.map(_.transformExpression())) &&
+              compareExpressions(rightKeys.map(_.transformExpression()), hj.rightKeys.map(_.transformExpression()))
+      case _ => false
+    }
+  }
+
+  def compareOptionExpression(expr1: Option[Expression], expr2: Option[Expression]): Boolean = {
+    if(expr1.isDefined && expr2.isDefined){
+      compareExpressions(Seq(expr1.get.transformExpression()), Seq(expr2.get.transformExpression()))
+    }else{
+      !expr1.isDefined && !expr2.isDefined
+    }
+  }
+
   override def outputPartitioning: Partitioning = joinType match {
     case LeftOuter => left.outputPartitioning
     case RightOuter => right.outputPartitioning

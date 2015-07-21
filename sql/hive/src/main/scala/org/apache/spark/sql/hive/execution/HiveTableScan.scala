@@ -58,6 +58,24 @@ case class HiveTableScan(
     @transient val context: HiveContext)
   extends LeafNode {
 
+  override def operatorMatch(plan: SparkPlan):Boolean = plan match{
+    case scan: HiveTableScan =>
+      this.relation.databaseName == scan.relation.databaseName &&
+        this.relation.tableName == scan.relation.tableName &&
+          this.compareExpressions(requestedAttributes.map(_.transformExpression()),
+              scan.requestedAttributes.map(_.transformExpression())) &&
+          compareOptionExpression(this.partitionPruningPred, scan.partitionPruningPred)
+    case _ => false
+  }
+
+  def compareOptionExpression(expr1: Option[Expression], expr2: Option[Expression]): Boolean = {
+    if(expr1.isDefined && expr2.isDefined){
+      compareExpressions(Seq(expr1.get.transformExpression()), Seq(expr2.get.transformExpression()))
+    }else{
+      !expr1.isDefined && !expr2.isDefined
+    }
+  }
+
   //this.nodeRef = relation.nodeRef 不是单纯地读数据（包含project和filter），relation匹配不代表tablescan匹配
 
   require(partitionPruningPred.isEmpty || relation.hiveQlTable.isPartitioned,

@@ -174,10 +174,6 @@ private[spark] class Executor(
 
       try {
         //zengdan
-        val costestimate = SparkEnv.get.conf.get("spark.sql.cost.estimate","false")
-        //if(costestimate == "true")
-        //  Stats.statistics.set(new java.util.HashMap[String, Array[Long]])
-        //zengdan
         Stats.statistics.set(scala.collection.mutable.Map[Int,Array[Int]]())
 
         Accumulators.clear()

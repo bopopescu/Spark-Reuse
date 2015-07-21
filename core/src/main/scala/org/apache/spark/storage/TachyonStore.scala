@@ -19,12 +19,14 @@ package org.apache.spark.storage
 
 import java.io.IOException
 import java.nio.ByteBuffer
+import java.util.List
 
 import com.google.common.io.ByteStreams
 import tachyon.client.{ReadType, WriteType}
 
 import org.apache.spark.Logging
 import org.apache.spark.util.Utils
+import tachyon.thrift.ClientFileInfo
 
 /**
  * Stores BlockManager blocks on Tachyon.
@@ -137,5 +139,10 @@ private[spark] class TachyonStore(
   //zengdan
   def removeGlobalFiles(operatorId: Int) = {
     tachyonManager.removeGlobalFiles(operatorId)
+  }
+
+  //zengdan
+  def listStatus(operatorId: Int): List[ClientFileInfo] = {
+    tachyonManager.listStatus(operatorId)
   }
 }

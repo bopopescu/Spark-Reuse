@@ -420,6 +420,11 @@ case class Distinct(partial: Boolean, child: SparkPlan, optionRef: Option[QNodeR
 
   @transient lazy val (fixedSize, varIndexes) = if(partial) (0,Nil) else outputSize(output)
 
+  override def operatorMatch(plan: SparkPlan):Boolean = plan match{
+    case dis: Distinct => this.partial == dis.partial
+    case _ => false
+  }
+
   override def requiredChildDistribution =
     if (partial) UnspecifiedDistribution :: Nil else ClusteredDistribution(child.output) :: Nil
 

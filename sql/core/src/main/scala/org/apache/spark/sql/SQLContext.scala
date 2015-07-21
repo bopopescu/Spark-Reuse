@@ -675,70 +675,20 @@ class SQLContext(@transient val sparkContext: SparkContext)
   def loadData(output: Seq[Attribute], nodeRef: Option[QNodeRef]): Option[RDD[Row]] = {
     var loaded: Option[RDD[Row]] = None
     if(nodeRef.isDefined && nodeRef.get.reuse) {
-      val (data: Option[(RDD[Row], RDD[Row])], exist: Boolean) =
-        this.sparkContext.loadOperatorFile[Row](nodeRef.get.id)
+      val (data: Option[RDD[Row]], exist: Boolean) =
+        this.sparkContext.loadCachedFile[Row](nodeRef.get.id)
       if (exist) {
-        loaded = Some(SQLContext.projectLoadedData(data.get._1, data.get._2, output))
+        val schema = QGDriver.getSchema(nodeRef.get.id, this, this.qgDriver)
+        if(!schema.isEmpty){
+          loaded = Some(SQLContext.projectLoadedData(data.get, schema.map(_.name), output))
+        }
+
       }
     }
     loaded
   }
 
-  /*
-  def projectLoadedData(rdd: RDD[Row], schema: RDD[Row], output: Seq[Attribute]):RDD[Row] = {
-    val loadSchemaRdd = schema.collect()
-    require(loadSchemaRdd.size == 1, "Length of schema is not 1!")
-    require(loadSchemaRdd(0).size == output.size, "Length of schema doesn't match!")
-
-    val schemaWithIndex = scala.collection.mutable.Map[String, Int]()
-    //schemaWithIndex ++= output.map(_.treeStringByName).zipWithIndex
-
-    var i = 0
-    while (i < loadSchemaRdd(0).size) {
-      schemaWithIndex += (loadSchemaRdd(0).getString(i)->i)
-      //schemaIndexMap += (i -> schemaWithIndex(loadSchemaRdd(0).getString(i)))
-      i += 1
-    }
-
-    //val attributeName = output.map(_.name)
-
-    rdd.mapPartitions { loadIter =>
-      new Iterator[Row] {
-        private val mutableRow = new GenericMutableRow(output.size)
-
-        override def hasNext = loadIter.hasNext
-
-        override def next: Row = {
-          val input = loadIter.next()
-          var i = 0
-          while (i < output.size) {
-            val inputIndex = try {
-              schemaWithIndex.get(output(i).name).get
-            }catch{
-              case e: Exception =>
-                throw new RuntimeException(e)
-            }
-            //val inputIndex = schemaIndexMap(i)
-            mutableRow(i) = output(i).dataType match {
-              case IntegerType => input.getInt(inputIndex)
-              case BooleanType => input.getBoolean(inputIndex)
-              case LongType => input.getLong(inputIndex)
-              case DoubleType => input.getDouble(inputIndex)
-              case FloatType => input.getFloat(inputIndex)
-              case ShortType => input.getShort(inputIndex)
-              case ByteType => input.getByte(inputIndex)
-              case StringType => input.getString(inputIndex)
-              case ArrayType(_,_) => input.getAs[Array[_]](inputIndex)
-            }
-            i += 1
-            }
-          mutableRow
-        }
-      }
-    }
-  }
-  */
-
+  //eager
   def cacheData(rdd: RDD[Row], output: Seq[Attribute],
                       id: Int):RDD[Row] = {
     //output.map(_.treeStringByName).foreach(println)
@@ -766,6 +716,11 @@ class SQLContext(@transient val sparkContext: SparkContext)
       data
     }
   }
+
+  //lazy
+  def cacheData(output: Seq[Attribute], id: Int): Boolean = {
+    QGDriver.saveSchema(output, id, this, this.qgDriver)
+  }
 }
 
 object SQLContext{
@@ -775,12 +730,26 @@ object SQLContext{
     require(loadSchemaRdd.size == 1, "Length of schema is not 1!")
     require(loadSchemaRdd(0).size == output.size, "Length of schema doesn't match!")
 
+    val schemaString: ArrayBuffer[String] = new ArrayBuffer[String](loadSchemaRdd(0).size)
+
+    var i = 0
+    while (i < loadSchemaRdd(0).size) {
+      schemaString += loadSchemaRdd(0).getString(i)
+      //schemaIndexMap += (i -> schemaWithIndex(loadSchemaRdd(0).getString(i)))
+      i += 1
+    }
+    projectLoadedData(rdd, schemaString.toSeq, output)
+
+  }
+
+  def projectLoadedData(rdd: RDD[Row], schema: Seq[String], output: Seq[Attribute]):RDD[Row] = {
+
     val schemaWithIndex = scala.collection.mutable.Map[String, Int]()
     //schemaWithIndex ++= output.map(_.treeStringByName).zipWithIndex
 
     var i = 0
-    while (i < loadSchemaRdd(0).size) {
-      schemaWithIndex += (loadSchemaRdd(0).getString(i) -> i)
+    while (i < schema.size) {
+      schemaWithIndex += (schema(i) -> i)
       //schemaIndexMap += (i -> schemaWithIndex(loadSchemaRdd(0).getString(i)))
       i += 1
     }

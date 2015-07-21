@@ -910,11 +910,27 @@ class SparkContext(config: SparkConf) extends Logging {
     val tachyonStore = SparkEnv.get.blockManager.tachyonStore
     val exists = tachyonStore.checkGlobalExists(operatorId)
     if(exists){
-      (Some(reuseFile(path), objectFile(schemaPath)), exists)
+      (Some(reuseFile[U](path), objectFile[U](schemaPath)), exists)
     }else{
       (None, exists)
     }
   }
+
+  //zengdan lazy
+  def loadCachedFile[U:ClassTag](operatorId: Int):(Option[(RDD[U])], Boolean) = {
+    val tachyonUrl = conf.get("spark.tachyonStore.url", "tachyon://localhost:19998")
+    val rootPath = conf.get("spark.tachyonStore.global.baseDir", "/global_spark_tachyon")
+    val path = tachyonUrl + rootPath + "/" + operatorId
+    val tachyonStore = SparkEnv.get.blockManager.tachyonStore
+    val exists = tachyonStore.checkGlobalExists(operatorId)
+    if(exists){
+      //(Some(reuseFile[U](path)), exists)
+      (Some(new TachyonRDD[U](this, operatorId)), exists)
+    }else{
+      (None, exists)
+    }
+  }
+
 
   //zengdan cache if not exists
   def loadOperatorFile[U:ClassTag](operatorId: Int, rdd: RDD[U], schemaRDD: RDD[U]):(RDD[U], RDD[U], Boolean) = {
@@ -937,6 +953,29 @@ class SparkContext(config: SparkConf) extends Logging {
       }
     }
     (reuseFile(path), objectFile(schemaPath), exists)
+  }
+
+
+  //zengdan cache if not exists, lazy execute
+  def saveSchema[U:ClassTag](operatorId: Int, schemaRDD: RDD[U]):(RDD[U], Boolean) = {
+    val tachyonUrl = conf.get("spark.tachyonStore.url", "tachyon://localhost:19998")
+    val rootPath = conf.get("spark.tachyonStore.global.baseDir", "/global_spark_tachyon")
+    val path = tachyonUrl + rootPath + "/" + operatorId
+    val schemaPath = path + "_meta"
+    val tachyonStore = SparkEnv.get.blockManager.tachyonStore
+    val exists = tachyonStore.checkGlobalExists(operatorId)
+    if(!exists){
+      try {
+        schemaRDD.saveAsObjectFile(schemaPath)
+      }catch{
+        case fe: FileAlreadyExistsException =>
+        case e: Exception =>
+          logInfo("Cache Data Exception: " + e.toString)
+          tachyonStore.removeGlobalFiles(operatorId)
+          throw new RuntimeException(e)
+      }
+    }
+    (objectFile(schemaPath), exists)
   }
 
   protected[spark] def checkpointFile[T: ClassTag](

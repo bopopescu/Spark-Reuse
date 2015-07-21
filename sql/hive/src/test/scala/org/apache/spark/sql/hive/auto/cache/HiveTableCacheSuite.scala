@@ -17,7 +17,7 @@ class HiveTableCacheSuite extends FunSuite with Logging{
   System.setProperty("spark.tachyonStore.global.baseDir","/global_spark_tachyon")
   val conf = new SparkConf()
   conf.setAppName("TPCH").setMaster("local")
-  conf.set("spark.sql.shuffle.partitions","1")
+  //conf.set("spark.sql.shuffle.partitions","1")
   var sc = new SparkContext(conf)
   sc.hadoopConfiguration.set("fs.tachyon.impl","tachyon.hadoop.TFS")
 
@@ -29,16 +29,18 @@ class HiveTableCacheSuite extends FunSuite with Logging{
   }.start()
 
   Thread.sleep(5000)
-  val iter = 1
+  val iter = 3
   val collect = true
 
   test("TPCH Q1"){
 
-    for(query <- 24 to 24) {
-      logInfo(s"=======query $query=======")
-      val q = query
-      this.getClass.getMethod("executeQ" + q, Array.empty[Class[_]]: _*).invoke(this, Array.empty[Object]: _*)
-      println(s"=======query $query=======")
+    for(i <- 1 to 1) {
+      for (query <- 21 to 21) {
+        logInfo(s"=======query $query=======")
+        val q = query
+        this.getClass.getMethod("executeQ" + q, Array.empty[Class[_]]: _*).invoke(this, Array.empty[Object]: _*)
+        println(s"=======query $query=======")
+      }
     }
   }
 
@@ -155,7 +157,7 @@ class HiveTableCacheSuite extends FunSuite with Logging{
 
       val res2 = sqlContext.sql("""select t1.s_acctbal, t1.s_name, t1.n_name, t1.p_partkey, t1.p_mfgr, t1.s_address, t1.s_phone, t1.s_comment from q2_minimum_cost_supplier_tmp1 t1 join q2_minimum_cost_supplier_tmp2 t2 on t1.p_partkey = t2.p_partkey and t1.ps_supplycost=t2.ps_min_supplycost""") //order by s_acctbal desc, n_name, s_name, p_partkey limit 100
 
-      if(collect) res2.collect()
+      if(collect) println("Result count is " + res2.collect().length)
       else println("Result count is " + res2.count())
     }
   }
@@ -285,7 +287,7 @@ class HiveTableCacheSuite extends FunSuite with Logging{
 
       val res2 = sqlContext.sql("""select ps_partkey, part_value as value from ( select ps_partkey, part_value, total_value from q11_part_tmp join q11_sum_tmp ) a where part_value > total_value * 0.0001""") // order by value desc""")
 
-      if(collect) res2.collect()
+      if(collect) println("Result count is " + res2.collect().length)
       else println("Result count is " + res2.count())
     }
   }
@@ -509,7 +511,7 @@ class HiveTableCacheSuite extends FunSuite with Logging{
       //order by numwait desc,s_name
       //limit 100""")
 
-      if(collect) res4.collect()
+      if(collect) println("Result count is " + res4.collect().length)
       else println("Result count is " + res4.count())
     }
   }
