@@ -76,7 +76,7 @@ class ReuseRDD[K, V](
 
     for (i <- 0 until inputSplits.size) {
       val path = inputSplits(i).asInstanceOf[FileSplit].getPath.toString
-      val index = path.lastIndexOf('-')
+      val index = path.lastIndexOf('_')
       val partitionId = path.substring(index+1).toInt
       var partitions = splits.get(partitionId)
       if(partitions == null){

@@ -17,6 +17,7 @@ import org.apache.spark.scheduler.Task
 import org.apache.spark._
 import org.apache.spark.serializer.{Serializer, SerializerInstance}
 import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.plans.logical.QNodeRef
 import org.apache.spark.sql.auto.cache.QGMasterMessages._
@@ -50,13 +51,17 @@ class QGDriver(sc: SparkContext) extends Actor with Logging{
       logInfo("Update Statistics in QGDriver")
       sender ! updateStats(stats)
 
+    case SaveSchema(output, id) =>
+      logInfo("Send Schema to QGMaster")
+      sender ! saveSchema(output, id)
+
+    case GetSchema(id) =>
+      logInfo("Got schema request in QGDriver")
+      sender ! getSchema(id)
+
     case CacheFailed(id) =>
       logInfo("Cache Failed in QGDriver")
       sender ! cacheFailed(id)
-
-    case RemoveJars(jars) =>
-      logInfo("Remove jars in QGDriver")
-      sender ! askMasterWithReply[Boolean](RemoveJars(jars))
 
     case AssociatedEvent(localAddress, remoteAddress, inbound) =>
       logInfo(s"Successfully connected to $remoteAddress")
@@ -65,11 +70,6 @@ class QGDriver(sc: SparkContext) extends Actor with Logging{
       logInfo(s"$address got disassociated.")
 
     }
-  }
-
-  override def postStop() {
-    qgmaster ! RemoveJars(sc.addedJars)
-    logInfo("PostStop in QGDriver")
   }
 
   /*
@@ -82,6 +82,14 @@ class QGDriver(sc: SparkContext) extends Actor with Logging{
     askMasterWithReply[PlanUpdate](MatchSerializedPlan(planDesc))
   }
   //*/
+
+  def saveSchema(output: Seq[Attribute], id: Int): Boolean = {
+    askMasterWithReply[Boolean](SaveSchema(output, id))
+  }
+
+  def getSchema(id: Int): Seq[Attribute] = {
+    askMasterWithReply[Seq[Attribute]](GetSchema(id))
+  }
 
   def cacheFailed(id: Int):Boolean = {
     askMasterWithReply[Boolean](CacheFailed(id))
@@ -140,12 +148,17 @@ object QGDriver{
     actor ! CacheFailed(operatorId)
   }
 
-  def removeJars(sqlContext: SQLContext, actor: ActorRef): Boolean = {
-    val sc = sqlContext.sparkContext
-    val conf = sc.getConf
+  def saveSchema(output: Seq[Attribute], id: Int, sqlContext: SQLContext, actor: ActorRef):Boolean = {
+    val conf = sqlContext.sparkContext.getConf
     val timeout = Duration.create(conf.get("spark.sql.auto.cache.ask.timeout","60").toLong, "seconds")
-    AkkaUtils.askWithReply[Boolean](RemoveJars(sc.addedJars), actor,
+    AkkaUtils.askWithReply[Boolean](SaveSchema(output, id), actor,
       AkkaUtils.numRetries(conf), AkkaUtils.retryWaitMs(conf), timeout)
   }
 
+  def getSchema(id: Int, sqlContext: SQLContext, actor: ActorRef): Seq[Attribute] = {
+    val conf = sqlContext.sparkContext.getConf
+    val timeout = Duration.create(conf.get("spark.sql.auto.cache.ask.timeout","60").toLong, "seconds")
+    AkkaUtils.askWithReply[Seq[Attribute]](GetSchema(id), actor,
+      AkkaUtils.numRetries(conf), AkkaUtils.retryWaitMs(conf), timeout)
+  }
 }

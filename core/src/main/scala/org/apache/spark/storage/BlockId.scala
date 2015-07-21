@@ -52,7 +52,7 @@ sealed abstract class BlockId {
 case class RDDBlockId(rddId: Int, splitIndex: Int, cacheID: Option[Int] = None) extends BlockId {//zengdan cacheID
   //def name = cacheID.getOrElse("rdd") + "rdd_" + rddId + "_" + splitIndex
   def name = if(cacheID.isDefined){
-      "operator_" + cacheID.get + "_" + splitIndex + "_" + rddId
+      "operator_" + cacheID.get + "_" + splitIndex
     }else {
       "rdd_" + rddId + "_" + splitIndex
     }

@@ -4,6 +4,7 @@ import java.io.{ObjectInput, ObjectOutput, Externalizable}
 import java.nio.ByteBuffer
 
 import org.apache.spark.sql.auto.cache.QGUtils.PlanDesc
+import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.logical.{QNodeRef, LogicalPlan}
 import org.apache.spark.storage.{StorageLevel, BlockId, BlockManagerId}
 import org.apache.spark.util.{SerializableBuffer, Utils}
@@ -23,8 +24,8 @@ private object QGMasterMessages {
   case class MatchSerializedPlan(plan: PlanDesc)
   case class UpdateInfo(statistics: Map[Int, Array[Long]])
   case class CacheFailed(operatorId: Int)
-  case class RemoveJars(jars: HashMap[String, Long])
-
+  case class SaveSchema(output: Seq[Attribute], id: Int)
+  case class GetSchema(id: Int)
 
 }
 

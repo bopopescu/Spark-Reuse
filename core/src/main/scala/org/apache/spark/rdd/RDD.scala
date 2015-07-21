@@ -521,6 +521,15 @@ abstract class RDD[T: ClassTag](
    */
   def cartesian[U: ClassTag](other: RDD[U]): RDD[(T, U)] = new CartesianRDD(sc, this, other)
 
+
+  /**
+   * zengdan
+   *
+   * Return the Cartesian product of this RDD and another one, that is, the RDD of all pairs of
+   * elements (a, b) where a is in `this` and b is in `other`.Meanwhile, collect the compute time.
+   */
+  def cartesianWithTime[U: ClassTag](other: RDD[U]): RDD[(T, U)] = new CartesianWithTimeRDD(sc, this, other)
+
   /**
    * Return an RDD of grouped items. Each group consists of a key and a sequence of elements
    * mapping to that key. The ordering of elements within each group is not guaranteed, and

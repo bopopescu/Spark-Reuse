@@ -20,7 +20,8 @@ package org.apache.spark.sql.execution
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.Logging
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql._
+import org.apache.spark.sql.catalyst.expressions.Row
 import org.apache.spark.sql.catalyst.{ScalaReflection, trees}
 import org.apache.spark.sql.catalyst.analysis.MultiInstanceRelation
 import org.apache.spark.sql.catalyst.expressions._
@@ -30,6 +31,7 @@ import org.apache.spark.sql.catalyst.plans.logical.QNodeRef
 import org.apache.spark.sql.catalyst.plans.physical._
 
 import org.apache.spark.sql.catalyst.types.{StringType, NativeType, DataType}
+import org.apache.spark.storage.StorageLevel
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -56,12 +58,11 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
 
   //zengdan
   lazy val transformedExpressions: Seq[Expression] = {
-    val x = this.expressions.foldLeft(new ArrayBuffer[Expression]){
+    this.expressions.foldLeft(new ArrayBuffer[Expression]){
       (buffers, expression) =>
         buffers.append(expression.transformExpression())
         buffers
-    }
-    x.toSeq
+    }.toSeq
   }
 
   //zengdan
@@ -186,8 +187,18 @@ abstract class SparkPlan extends QueryPlan[SparkPlan] with Logging with Serializ
   //zengdan
   protected def cacheData(newRdd: RDD[Row], output: Seq[Attribute], nodeRef: Option[QNodeRef]):RDD[Row] = {
     if(nodeRef.isDefined && nodeRef.get.cache) {
-      newRdd.cacheID = Some(nodeRef.get.id)
-      return sqlContext.cacheData(newRdd, output, nodeRef.get.id)
+
+      //return sqlContext.cacheData(newRdd, output, nodeRef.get.id)
+      if(sqlContext.cacheData(output, nodeRef.get.id)){
+        //send schema to QGMaster
+        val rdd = newRdd.map(ScalaReflection.convertRowToScala(_,
+          StructType.fromAttributes(output)))
+        rdd.cacheID = Some(nodeRef.get.id)
+        rdd.persist(StorageLevel.OFF_HEAP)
+        rdd
+      }else{
+        newRdd
+      }
     }else {
       newRdd
     }

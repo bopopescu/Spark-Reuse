@@ -74,14 +74,16 @@ private[spark] class ShuffleMapTask(
 
       if(rdd.cacheID.isDefined){
         //need to collect shuffle write time, defined in exchange
+        val iter = rdd.iterator(partition, context).asInstanceOf[Iterator[_ <: Product2[Any, Any]]]
+
         val start = System.nanoTime()
-        writer.write(rdd.iterator(partition, context).asInstanceOf[Iterator[_ <: Product2[Any, Any]]])
+        writer.write(iter)
         val time = System.nanoTime() - start
         val statistics = Stats.statistics.get()
         val childtime = statistics.get(rdd.cacheID.get)
         if(!childtime.isDefined)
           return writer.stop(success = true).get
-        logDebug(s"In ShuffleMapTask, childtime is ${childtime.get(0)}, write time is $time")
+        logDebug(s"In ShuffleMapTask, childtime is ${childtime.get(0)} ms, write time is ${time/1e6} ms")
         statistics.put(rdd.cacheID.get, Array((time/1e6-childtime.get(0)).toInt,0))
       }else{
         writer.write(rdd.iterator(partition, context).asInstanceOf[Iterator[_ <: Product2[Any, Any]]])

@@ -18,7 +18,7 @@
 package org.apache.spark.storage
 
 import java.text.SimpleDateFormat
-import java.util.{Date, Random}
+import java.util.{List, Date, Random}
 
 import tachyon.client.TachyonFS
 import tachyon.client.TachyonFile
@@ -26,6 +26,7 @@ import tachyon.client.TachyonFile
 import org.apache.spark.{SparkConf, SparkEnv, Logging}
 import org.apache.spark.executor.ExecutorExitCode
 import org.apache.spark.util.Utils
+import tachyon.thrift.ClientFileInfo
 
 
 /**
@@ -65,6 +66,9 @@ private[spark] class TachyonBlockManager(
       try {
         if (!client.exist(path)) {
           foundLocalDir = client.mkdir(path)
+          tachyonDir = client.getFile(path)
+        }else{
+          foundLocalDir = true
           tachyonDir = client.getFile(path)
         }
       } catch {
@@ -134,13 +138,34 @@ private[spark] class TachyonBlockManager(
     file
   }
 
+  def getFile(filename:String, dirs: Array[TachyonFile]): TachyonFile = {
+    //filename is identified by plan.id_partition.id
+    //return subs(dirId)(subDirId)/filename
+    val hash = Utils.nonNegativeHash(filename)
+    val dirId = hash % dirs.length
+
+    val operatorId = filename.split("_")(1)
+
+    val parentPath = dirs(dirId).getPath + "/" + operatorId
+    if(!client.exist(parentPath)){
+      client.mkdir(parentPath)
+    }
+
+
+    val filePath = parentPath + "/" + filename
+    if(!client.exist(filePath)) {
+      client.createFile(filePath)
+    }
+    val file = client.getFile(filePath)
+    file
+  }
+
   def getFile(filename: String): TachyonFile = {
     // Figure out which tachyon directory it hashes to, and which subdirectory in that
     filename.split("_")(0) match{
 
       case "operator" =>
-        val index = filename.lastIndexOf('_')
-        getFile(filename.substring(0,index), tachyonGlobalDirs, subGlobalDirs)
+        getFile(filename, tachyonGlobalDirs)
       case _ =>
         getFile(filename, tachyonDirs, subDirs)  //original  zengdan
     }
@@ -194,6 +219,13 @@ private[spark] class TachyonBlockManager(
     if(client.exist(metaPath)){
       client.delete(metaPath, true)
     }
+  }
+
+  //zengdan
+  def listStatus(operatorID: Int): List[ClientFileInfo] = {
+    val root = SparkEnv.get.conf.get("spark.tachyonStore.global.baseDir", "/global_spark_tachyon")
+    val filePath = s"$root/${operatorID}"
+    client.listStatus(filePath)
   }
 
   def getFile(blockId: BlockId): TachyonFile = getFile(blockId.name)

@@ -31,13 +31,18 @@ private[spark] class ZippedPartitionsPartition(
   extends Partition {
 
   override val index: Int = idx
-  var partitionValues = rdds.map(rdd => rdd.partitions(idx))
+
+  //var partitionValues = rdds.map(rdd => rdd.partitions(idx))
+  //zengdan
+  var partitionValues = rdds.map(rdd => rdd.partitions.find(_.index == idx).get)
   def partitions = partitionValues
 
   @throws(classOf[IOException])
   private def writeObject(oos: ObjectOutputStream): Unit = Utils.tryOrIOException {
     // Update the reference to parent split at the time of task serialization
-    partitionValues = rdds.map(rdd => rdd.partitions(idx))
+    //partitionValues = rdds.map(rdd => rdd.partitions(idx))
+    //zengdan
+    partitionValues = rdds.map(rdd => rdd.partitions.find(_.index == idx).get)
     oos.defaultWriteObject()
   }
 }

@@ -34,6 +34,7 @@ import org.apache.spark.executor.{ExecutorURLClassLoader, ChildExecutorURLClassL
 import org.apache.spark.serializer.Serializer
 
 import org.apache.spark.sql.auto.cache.QGMasterMessages._
+import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.storage.TachyonBlockManager
@@ -100,23 +101,18 @@ private[spark] class QGMaster(
       QueryGraph.qg.updateStatistics(statistics)
       sender ! true
 
+    case SaveSchema(output, id) =>
+      logInfo("Save Schema in QGMaster")
+      QueryGraph.qg.saveSchema(output, id)
+      sender ! true
+
+    case GetSchema(id) =>
+      logInfo("Got schema request in QGMaster")
+      sender ! QueryGraph.qg.getSchema(id)
+
     case CacheFailed(id) =>
       logInfo("Cache Failed in QGMaster")
       QueryGraph.qg.cacheFailed(id)
-      sender ! true
-
-    case RemoveJars(jars) =>
-      logInfo("RemoveJars in QGMaster")
-
-      for((name, time) <- jars){
-        currentJars.remove(name)
-        urlClassLoader = createClassLoader()
-        val localName = name.split("/").last
-        val file = new File(getRootDir(""), localName)
-        if(file.exists()){
-          file.delete()
-        }
-      }
       sender ! true
 
     case AssociatedEvent(localAddress, remoteAddress, inbound) =>

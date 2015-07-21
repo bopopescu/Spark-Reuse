@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.auto.cache.QGUtils.{NodeDesc, PlanUpdate}
-import org.apache.spark.sql.catalyst.expressions.Expression
+import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.plans.logical.QNodeRef
 import org.apache.spark.sql.columnar.{InMemoryColumnarTableScan, InMemoryRelation}
@@ -36,6 +36,8 @@ class QueryNode(plan: SparkPlan) {
 
   var lastAccess: Long = System.currentTimeMillis()
   var cached: Boolean = false   //whether has data in tachyon
+
+  var schema: Option[Seq[Attribute]] = None
 
   def getPlan: SparkPlan = plan
 
@@ -132,7 +134,7 @@ class QueryGraph{
     node.stats(0) += 1
     node.lastAccess = System.currentTimeMillis()
     //reuse stored data
-    if(node.cached) {
+    if(node.cached && node.schema.isDefined) {
        plan.nodeRef.get.reuse = true
     }
     //没有统计信息的暂不参与计算
@@ -253,6 +255,7 @@ class QueryGraph{
   def subsumptionMatch(plan: SparkPlan, child: QueryNode, varNodes: HashMap[Int, ArrayBuffer[NodeDesc]]): Unit = {
     plan match{
       case Filter(_, _, _) =>
+        /*
         for(candidate <- child.parents){
           if(candidate.getPlan.isInstanceOf[Filter]){
             val candidateExpr = candidate.getPlan.transformedExpressions
@@ -261,6 +264,7 @@ class QueryGraph{
 
           }
         }
+        */
       case Project(_, _) =>
         var found = false
         var index = 0
@@ -308,63 +312,21 @@ class QueryGraph{
   }
   //*/
 
-  /*
-  def matchPlan(plan: SparkPlan, refs: HashMap[Int, QNodeRef]):(QueryNode, Boolean) = {
-
-    if(plan.isInstanceOf[InMemoryColumnarTableScan]){
-      val child = plan.asInstanceOf[InMemoryColumnarTableScan].relation.child
-      if(!child.nodeRef.isDefined)
-        return matchPlan(child, refs)
-      val node = nodes.get(child.nodeRef.get.id)
-      node.stats(0) += 1
-      update(node, child)
-      return (node, true)
+  def saveSchema(output: Seq[Attribute], id: Int): Unit ={
+    val refNode = nodes.get(id)
+    if(refNode.isDefined && refNode.get.cached){
+      refNode.get.schema = Some(output)
     }
-
-    if(plan.children == null || plan.children.length <= 0){
-      for (leave <- root.parents) {
-        if (leave.getPlan.operatorMatch(plan)) {
-          leave.stats(0) += 1
-          update(leave, plan)
-          plan.nodeRef = Some(QNodeRef(leave.id, false, false, false))
-          refs.put(plan.id, plan.nodeRef.get)
-          return (leave, true)
-        }
-      }
-      return (addNode(ArrayBuffer(root), plan, refs), false)
-    }
-
-    //ensure all children matches
-    var i = 0
-    val children = new ArrayBuffer[QueryNode]()
-    val childrenNode = new ArrayBuffer[QueryNode]()
-    while(i < plan.children.length) {
-      val (curNode, curMatch) = matchPlan(plan.children(i), refs)
-      if (curNode == null)
-        return (null, false)
-      childrenNode.append(curNode)
-      children.append(curNode)
-      i += 1
-    }
-
-    if(childrenNode.length == plan.children.length) {
-      for (candidate <- childrenNode(0).parents) {
-        if (candidate.getPlan.operatorMatch(plan)) {
-          if((childrenNode.length == 1) ||
-            (childrenNode.length > 1 && !childrenNode.exists(!_.parents.contains((candidate))))) {
-            candidate.stats(0) += 1
-            update(candidate, plan)
-            plan.nodeRef = Some(QNodeRef(candidate.id, false, false, false))
-            refs.put(plan.id, plan.nodeRef.get)
-            return (candidate, true)
-          }
-        }
-      }
-    }
-    //add new node
-    return (addNode(children, plan, refs), false)
   }
-   */
+
+  def getSchema(id: Int): Seq[Attribute] ={
+    val refNode = nodes.get(id)
+    if(refNode.isDefined && refNode.get.schema.isDefined){
+      refNode.get.schema.get
+    }else{
+      Nil
+    }
+  }
 
   def cacheFailed(operatorId: Int){
     val nd = nodes.get(operatorId)
