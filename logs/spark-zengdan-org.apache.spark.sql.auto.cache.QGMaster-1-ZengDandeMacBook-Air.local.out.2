@@ -1,0 +1,52 @@
+Spark assembly has been built with Hive, including Datanucleus jars on classpath
+Spark Command: /Library/Java/JavaVirtualMachines/jdk1.7.0_65.jdk/Contents/Home/bin/java -cp ::/Users/zengdan/Spark-Reuse/sbin/../conf:/Users/zengdan/Spark-Reuse/assembly/target/scala-2.10/spark-assembly-1.2.0-hadoop2.2.0.jar:/Users/zengdan/Spark-Reuse/lib_managed/jars/datanucleus-api-jdo-3.2.6.jar:/Users/zengdan/Spark-Reuse/lib_managed/jars/datanucleus-core-3.2.10.jar:/Users/zengdan/Spark-Reuse/lib_managed/jars/datanucleus-rdbms-3.2.9.jar -XX:MaxPermSize=128m -Xms512m -Xmx512m org.apache.spark.sql.auto.cache.QGMaster --ip localhost --port 7070 --webui-port 8088
+========================================
+
+========maxNodes========
+========maxNodes========
+========maxNodes========
+========maxNodes========
+=====Parents=====
+id: 0 statistics: 1 0 0 HiveTableScan
+id: 8 statistics: 1 0 0 HiveTableScan
+=====Nodes=====
+17 id: 17 statistics: 1 0 0 CartesianProduct 
+8 id: 8 statistics: 1 0 0 HiveTableScan 
+11 id: 11 statistics: 1 0 0 Aggregate 
+20 id: 20 statistics: 1 0 0 Aggregate 
+2 id: 2 statistics: 3 0 0 Project 
+5 id: 5 statistics: 1 0 0 Aggregate 
+14 id: 14 statistics: 1 0 0 HashOuterJoin 
+13 id: 13 statistics: 1 0 0 Exchange 
+4 id: 4 statistics: 1 0 0 Filter 
+22 id: 22 statistics: 1 0 0 Aggregate 
+16 id: 16 statistics: 1 0 0 Project 
+7 id: 7 statistics: 1 16 16 Aggregate 
+1 id: 1 statistics: 1 0 0 Filter 
+10 id: 10 statistics: 1 0 0 Exchange 
+19 id: 19 statistics: 1 0 0 Project 
+18 id: 18 statistics: 1 0 0 Filter 
+9 id: 9 statistics: 1 0 0 Aggregate 
+21 id: 21 statistics: 1 259 0 Exchange 
+3 id: 3 statistics: 1 0 0 InMemoryColumnarTableScan 
+12 id: 12 statistics: 1 0 0 InMemoryColumnarTableScan 
+15 id: 15 statistics: 1 0 0 Filter 
+6 id: 6 statistics: 1 0 0 Exchange 
+0 id: 0 statistics: 1 0 0 HiveTableScan 
+===============
+Exception in thread "Thread-2" java.lang.NoClassDefFoundError: org/apache/log4j/spi/ThrowableInformation
+	at org.apache.log4j.spi.LoggingEvent.<init>(LoggingEvent.java:165)
+	at org.apache.log4j.Category.forcedLog(Category.java:391)
+	at org.apache.log4j.Category.error(Category.java:322)
+	at tachyon.util.CommonUtils.runtimeException(CommonUtils.java:474)
+	at tachyon.worker.WorkerClientHeartbeatExecutor.heartbeat(WorkerClientHeartbeatExecutor.java:42)
+	at tachyon.HeartbeatThread.run(HeartbeatThread.java:50)
+Caused by: java.lang.ClassNotFoundException: org.apache.log4j.spi.ThrowableInformation
+	at java.net.URLClassLoader$1.run(URLClassLoader.java:366)
+	at java.net.URLClassLoader$1.run(URLClassLoader.java:355)
+	at java.security.AccessController.doPrivileged(Native Method)
+	at java.net.URLClassLoader.findClass(URLClassLoader.java:354)
+	at java.lang.ClassLoader.loadClass(ClassLoader.java:425)
+	at sun.misc.Launcher$AppClassLoader.loadClass(Launcher.java:308)
+	at java.lang.ClassLoader.loadClass(ClassLoader.java:358)
+	... 6 more

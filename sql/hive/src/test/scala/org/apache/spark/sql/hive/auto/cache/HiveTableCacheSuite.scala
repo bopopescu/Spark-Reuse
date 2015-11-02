@@ -28,14 +28,13 @@ class HiveTableCacheSuite extends FunSuite with Logging{
     }
   }.start()
 
-  Thread.sleep(5000)
-  val iter = 3
+  val iter = 2
   val collect = true
 
   test("TPCH Q1"){
 
     for(i <- 1 to 1) {
-      for (query <- 21 to 21) {
+      for (query <- 1 to 1) {
         logInfo(s"=======query $query=======")
         val q = query
         this.getClass.getMethod("executeQ" + q, Array.empty[Class[_]]: _*).invoke(this, Array.empty[Object]: _*)
@@ -132,7 +131,7 @@ class HiveTableCacheSuite extends FunSuite with Logging{
 
       val res0 = sqlContext.sql("""select l_returnflag, l_linestatus, sum(l_quantity) , sum(l_extendedprice) as sum_base_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order
                                 from lineitem
-                                where l_shipdate <= '1998-09-16'
+                                where l_shipdate <= '1998-09-16' and l_returnflag like '%R%'
                                 group by l_returnflag, l_linestatus""")
 
       //res0.queryExecution.optimizedPlan(0).expressions.foreach(x => println(x.treeString))

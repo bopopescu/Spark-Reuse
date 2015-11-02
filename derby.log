@@ -1,7 +1,7 @@
 ----------------------------------------------------------------
-Tue Jul 14 20:13:23 CST 2015:
-Booting Derby version The Apache Software Foundation - Apache Derby - 10.10.1.1 - (1458268): instance a816c00e-014e-8c7b-d652-00001801a878 
-on database directory /Users/zengdan/Spark-Reuse/metastore_db with class loader sun.misc.Launcher$AppClassLoader@2bb0bf9a 
+Tue Aug 11 10:39:07 CST 2015:
+Booting Derby version The Apache Software Foundation - Apache Derby - 10.10.1.1 - (1458268): instance a816c00e-014f-1aa0-24b6-000017f7a268 
+on database directory /Users/zengdan/Spark-Reuse/metastore_db with class loader sun.misc.Launcher$AppClassLoader@6da21389 
 Loaded from file:/Users/zengdan/Spark-Reuse/assembly/target/scala-2.10/spark-assembly-1.2.0-hadoop2.2.0.jar
 java.vendor=Oracle Corporation
 java.runtime.version=1.7.0_65-b17

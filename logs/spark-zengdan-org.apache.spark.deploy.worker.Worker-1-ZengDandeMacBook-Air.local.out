@@ -1,0 +1,5 @@
+Spark assembly has been built with Hive, including Datanucleus jars on classpath
+Spark Command: java -cp ::/Users/zengdan/Spark-Reuse/sbin/../conf:/Users/zengdan/Spark-Reuse/assembly/target/scala-2.10/spark-assembly-1.2.0-hadoop2.2.0.jar:/Users/zengdan/Spark-Reuse/lib_managed/jars/datanucleus-api-jdo-3.2.6.jar:/Users/zengdan/Spark-Reuse/lib_managed/jars/datanucleus-core-3.2.10.jar:/Users/zengdan/Spark-Reuse/lib_managed/jars/datanucleus-rdbms-3.2.9.jar -XX:MaxPermSize=128m -Dspark.akka.logLifecycleEvents=true -Xms512m -Xmx512m org.apache.spark.deploy.worker.Worker spark://ZengDandeMacBook-Air.local:7077
+========================================
+
+15/08/11 21:42:47 ERROR Worker: RECEIVED SIGNAL 15: SIGTERM

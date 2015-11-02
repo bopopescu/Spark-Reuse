@@ -77,6 +77,7 @@ class DirectTaskResult[T](var valueBytes: ByteBuffer, var accumUpdates: Map[Long
     in.readFully(byteVal)
     valueBytes = ByteBuffer.wrap(byteVal)
 
+    //zengdan
     val numStats = in.readByte()
     if(numStats == 0){
       statistics = None

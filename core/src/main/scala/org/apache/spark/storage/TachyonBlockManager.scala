@@ -106,7 +106,6 @@ private[spark] class TachyonBlockManager(
     client.exist(file.getPath())
   }
 
-  //zengdan
   def getFile(filename:String, dirs: Array[TachyonFile], subs: Array[Array[TachyonFile]]): TachyonFile = {
     //filename is identified by plan.id_partition.id
     //return subs(dirId)(subDirId)/filename
@@ -138,6 +137,7 @@ private[spark] class TachyonBlockManager(
     file
   }
 
+  //zengdan
   def getFile(filename:String, dirs: Array[TachyonFile]): TachyonFile = {
     //filename is identified by plan.id_partition.id
     //return subs(dirId)(subDirId)/filename
@@ -157,6 +157,7 @@ private[spark] class TachyonBlockManager(
       client.createFile(filePath)
     }
     val file = client.getFile(filePath)
+
     file
   }
 

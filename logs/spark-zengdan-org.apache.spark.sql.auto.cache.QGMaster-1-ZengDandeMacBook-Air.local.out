@@ -1,0 +1,17 @@
+Spark assembly has been built with Hive, including Datanucleus jars on classpath
+Spark Command: /Library/Java/JavaVirtualMachines/jdk1.7.0_65.jdk/Contents/Home/bin/java -cp ::/Users/zengdan/Spark-Reuse/sbin/../conf:/Users/zengdan/Spark-Reuse/assembly/target/scala-2.10/spark-assembly-1.2.0-hadoop2.2.0.jar:/Users/zengdan/Spark-Reuse/lib_managed/jars/datanucleus-api-jdo-3.2.6.jar:/Users/zengdan/Spark-Reuse/lib_managed/jars/datanucleus-core-3.2.10.jar:/Users/zengdan/Spark-Reuse/lib_managed/jars/datanucleus-rdbms-3.2.9.jar -XX:MaxPermSize=128m -Xms512m -Xmx512m org.apache.spark.sql.auto.cache.QGMaster --ip localhost --port 7070 --webui-port 8088
+========================================
+
+========maxNodes========
+========maxNodes========
+=====Parents=====
+id: 0 statistics: 1 2826 26425168 HiveTableScan
+=====Nodes=====
+2 id: 2 statistics: 1 3451 20206642 Project 
+5 id: 5 statistics: 1 8 264 Aggregate 
+4 id: 4 statistics: 1 329 720 Exchange 
+1 id: 1 statistics: 1 114 26149772 Filter 
+3 id: 3 statistics: 1 980 720 Aggregate 
+0 id: 0 statistics: 1 2826 26425168 HiveTableScan 
+===============
+15/08/11 21:42:43 ERROR QGMaster: RECEIVED SIGNAL 15: SIGTERM

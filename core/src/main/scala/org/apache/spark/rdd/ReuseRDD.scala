@@ -21,7 +21,6 @@ import scala.reflect.ClassTag
 /**
  * Created by zengdan on 15-6-1.
  */
-private[spark] class ArraySplits
 
 private[spark] class HadoopCombinePartition(rddId: Int, idx: Int, @transient s: Array[InputSplit])
   extends Partition {

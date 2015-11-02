@@ -24,7 +24,7 @@ import java.util.List
 import com.google.common.io.ByteStreams
 import tachyon.client.{ReadType, WriteType}
 
-import org.apache.spark.Logging
+import org.apache.spark.{SparkEnv, Logging}
 import org.apache.spark.util.Utils
 import tachyon.thrift.ClientFileInfo
 
@@ -75,7 +75,16 @@ private[spark] class TachyonStore(
     logDebug(s"Attempting to put block $blockId into Tachyon")
     val startTime = System.currentTimeMillis
     val file = tachyonManager.getFile(blockId)
-    val os = file.getOutStream(WriteType.TRY_CACHE)
+    //zengdan
+    val writeType = SparkEnv.get.conf.get("spark.storage.tachyon.write.type", "TRY_CACHE")
+    val os = writeType match {
+      case "TRY_CACHE" => file.getOutStream(WriteType.TRY_CACHE)
+      case "MUST_CACHE" => file.getOutStream(WriteType.MUST_CACHE)
+      case "CACHE_THROUGH" => file.getOutStream(WriteType.CACHE_THROUGH)
+      case "THROUGH" => file.getOutStream(WriteType.THROUGH)
+      case "ASYNC_THROUGH" => file.getOutStream(WriteType.ASYNC_THROUGH)
+    }
+    //val os = file.getOutStream(WriteType.TRY_CACHE)
     os.write(byteBuffer.array())
     os.close()
     val finishTime = System.currentTimeMillis
@@ -107,7 +116,9 @@ private[spark] class TachyonStore(
     if (file == null || file.getLocationHosts.size == 0) {
       return None
     }
-    val is = file.getInStream(ReadType.CACHE)
+    //val is = file.getInStream(ReadType.CACHE)
+    //zengdan replace CACHE with NO_CACHE
+    val is = file.getInStream(ReadType.NO_CACHE)
     assert (is != null)
     try {
       val size = file.length

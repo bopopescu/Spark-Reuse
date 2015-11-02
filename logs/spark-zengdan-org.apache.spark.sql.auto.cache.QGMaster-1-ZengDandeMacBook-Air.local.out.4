@@ -1,0 +1,51 @@
+Spark assembly has been built with Hive, including Datanucleus jars on classpath
+Spark Command: /Library/Java/JavaVirtualMachines/jdk1.7.0_65.jdk/Contents/Home/bin/java -cp ::/Users/zengdan/Spark-Reuse/sbin/../conf:/Users/zengdan/Spark-Reuse/assembly/target/scala-2.10/spark-assembly-1.2.0-hadoop2.2.0.jar:/Users/zengdan/Spark-Reuse/lib_managed/jars/datanucleus-api-jdo-3.2.6.jar:/Users/zengdan/Spark-Reuse/lib_managed/jars/datanucleus-core-3.2.10.jar:/Users/zengdan/Spark-Reuse/lib_managed/jars/datanucleus-rdbms-3.2.9.jar -XX:MaxPermSize=128m -Xms512m -Xmx512m org.apache.spark.sql.auto.cache.QGMaster --ip localhost --port 7070 --webui-port 8088
+========================================
+
+15/07/24 08:22:29 ERROR : Failed to connect (1) to master localhost/127.0.0.1:19998 : java.net.ConnectException: Connection refused
+15/07/24 08:22:30 ERROR : Failed to connect (2) to master localhost/127.0.0.1:19998 : java.net.ConnectException: Connection refused
+15/07/24 08:22:31 ERROR : Failed to connect (3) to master localhost/127.0.0.1:19998 : java.net.ConnectException: Connection refused
+15/07/24 08:22:32 ERROR : Failed to connect (4) to master localhost/127.0.0.1:19998 : java.net.ConnectException: Connection refused
+15/07/24 08:22:33 ERROR : Failed to connect (5) to master localhost/127.0.0.1:19998 : java.net.ConnectException: Connection refused
+15/07/24 08:22:34 ERROR OneForOneStrategy: Failed to connect to master localhost/127.0.0.1:19998 after 5 attempts
+akka.actor.ActorInitializationException: exception during creation
+	at akka.actor.ActorInitializationException$.apply(Actor.scala:164)
+	at akka.actor.ActorCell.create(ActorCell.scala:596)
+	at akka.actor.ActorCell.invokeAll$1(ActorCell.scala:456)
+	at akka.actor.ActorCell.systemInvoke(ActorCell.scala:478)
+	at akka.dispatch.Mailbox.processAllSystemMessages(Mailbox.scala:263)
+	at akka.dispatch.Mailbox.run(Mailbox.scala:219)
+	at akka.dispatch.ForkJoinExecutorConfigurator$AkkaForkJoinTask.exec(AbstractDispatcher.scala:393)
+	at scala.concurrent.forkjoin.ForkJoinTask.doExec(ForkJoinTask.java:260)
+	at scala.concurrent.forkjoin.ForkJoinPool$WorkQueue.runTask(ForkJoinPool.java:1339)
+	at scala.concurrent.forkjoin.ForkJoinPool.runWorker(ForkJoinPool.java:1979)
+	at scala.concurrent.forkjoin.ForkJoinWorkerThread.run(ForkJoinWorkerThread.java:107)
+Caused by: java.io.IOException: Failed to connect to master localhost/127.0.0.1:19998 after 5 attempts
+	at tachyon.client.TachyonFS.connect(TachyonFS.java:293)
+	at tachyon.client.TachyonFS.getFileId(TachyonFS.java:1011)
+	at tachyon.client.TachyonFS.exist(TachyonFS.java:633)
+	at org.apache.spark.storage.TachyonBlockManager$.removeGlobalDir(TachyonBlockManager.scala:302)
+	at org.apache.spark.sql.auto.cache.QGMaster.preStart(QGMater.scala:79)
+	at akka.actor.Actor$class.aroundPreStart(Actor.scala:470)
+	at org.apache.spark.sql.auto.cache.QGMaster.aroundPreStart(QGMater.scala:48)
+	at akka.actor.ActorCell.create(ActorCell.scala:580)
+	... 9 more
+Caused by: tachyon.org.apache.thrift.TException: Failed to connect to master localhost/127.0.0.1:19998 after 5 attempts
+	at tachyon.master.MasterClient.connect(MasterClient.java:178)
+	at tachyon.client.TachyonFS.connect(TachyonFS.java:290)
+	... 16 more
+Caused by: tachyon.org.apache.thrift.transport.TTransportException: java.net.ConnectException: Connection refused
+	at tachyon.org.apache.thrift.transport.TSocket.open(TSocket.java:185)
+	at tachyon.org.apache.thrift.transport.TFramedTransport.open(TFramedTransport.java:81)
+	at tachyon.master.MasterClient.connect(MasterClient.java:156)
+	... 17 more
+Caused by: java.net.ConnectException: Connection refused
+	at java.net.PlainSocketImpl.socketConnect(Native Method)
+	at java.net.AbstractPlainSocketImpl.doConnect(AbstractPlainSocketImpl.java:339)
+	at java.net.AbstractPlainSocketImpl.connectToAddress(AbstractPlainSocketImpl.java:200)
+	at java.net.AbstractPlainSocketImpl.connect(AbstractPlainSocketImpl.java:182)
+	at java.net.SocksSocketImpl.connect(SocksSocketImpl.java:392)
+	at java.net.Socket.connect(Socket.java:579)
+	at tachyon.org.apache.thrift.transport.TSocket.open(TSocket.java:180)
+	... 19 more
+15/07/24 08:32:44 ERROR QGMaster: RECEIVED SIGNAL 15: SIGTERM

@@ -1,0 +1,13 @@
+----------------------------------------------------------------
+Wed Sep 23 17:30:45 CST 2015:
+Booting Derby version The Apache Software Foundation - Apache Derby - 10.10.1.1 - (1458268): instance a816c00e-014f-f98a-73b8-000005fe4ce0 
+on database directory /Users/zengdan/Spark-Reuse/assembly/metastore_db with class loader sun.misc.Launcher$AppClassLoader@3479404a 
+Loaded from file:/Users/zengdan/.m2/repository/org/apache/derby/derby/10.10.1.1/derby-10.10.1.1.jar
+java.vendor=Oracle Corporation
+java.runtime.version=1.7.0_65-b17
+user.dir=/Users/zengdan/Spark-Reuse/assembly
+os.name=Mac OS X
+os.arch=x86_64
+os.version=10.9.5
+derby.system.home=null
+Database Class Loader started - derby.database.classpath=''

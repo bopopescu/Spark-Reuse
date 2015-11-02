@@ -312,6 +312,7 @@ abstract class TreeNode[BaseType <: TreeNode[BaseType]] {
   /** String representation of this node without any children */
   def simpleString = s"$nodeName $argString"
 
+  //zengdan
   def simpleStringByName = s"$nodeName $argStringMinusChildren"
 
   override def toString: String = treeString

@@ -108,7 +108,7 @@ private[spark] case class TestBlockId(id: String) extends BlockId {
 @DeveloperApi
 object BlockId {
   val RDD = "rdd_([0-9]+)_([0-9]+)".r
-  val OPERATOR = "operator_([0-9]+)_([0-9]+)_([0-9]+)".r  //zengdan
+  val OPERATOR = "operator_([0-9]+)_([0-9]+)".r  //zengdan
   val SHUFFLE = "shuffle_([0-9]+)_([0-9]+)_([0-9]+)".r
   val SHUFFLE_DATA = "shuffle_([0-9]+)_([0-9]+)_([0-9]+).data".r
   val SHUFFLE_INDEX = "shuffle_([0-9]+)_([0-9]+)_([0-9]+).index".r
@@ -121,8 +121,8 @@ object BlockId {
   def apply(id: String) = id match {
     case RDD(rddId, splitIndex) =>
       RDDBlockId(rddId.toInt, splitIndex.toInt)
-    case OPERATOR(cacheId, splitIndex, rddId) =>
-      RDDBlockId(rddId.toInt, splitIndex.toInt, Some(cacheId.toInt)) //zengdan
+    case OPERATOR(cacheId, splitIndex) =>
+      RDDBlockId(cacheId.toInt, splitIndex.toInt, Some(cacheId.toInt)) //zengdan
     case SHUFFLE(shuffleId, mapId, reduceId) =>
       ShuffleBlockId(shuffleId.toInt, mapId.toInt, reduceId.toInt)
     case SHUFFLE_DATA(shuffleId, mapId, reduceId) =>
